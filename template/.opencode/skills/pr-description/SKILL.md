@@ -7,6 +7,7 @@ compatibility: opencode-v2
 Read `.ai/pull-request-template.md` and preserve its complete section order. Produce a concise imperative title and a detailed body with:
 
 - linked ticket or request
+- selected workflow path, estimate and actual classifier evidence, correction count, and any escalation
 - problem and intent
 - implementation summary grouped by module
 - explicit non-goals
@@ -18,3 +19,5 @@ Read `.ai/pull-request-template.md` and preserve its complete section order. Pro
 - reviewer checklist
 
 Write `Not applicable` with a concise reason instead of omitting a section. Never say checks passed unless the gate report proves it. Do not include issue-closing keywords, reviewers, assignees, labels, comments, or rollout claims unless the user explicitly approved them. Never create, push, mark ready, approve, or merge the pull request.
+
+For fast-path work, report both classifier runs and confirm that the final diff remained within the configured file, line, module, risk, and correction limits. If it did not, describe the handoff to the standard workflow instead of presenting the work as fast-path complete.

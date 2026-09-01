@@ -26,6 +26,25 @@ Do not add issue-closing keywords such as "Fixes" or "Closes" unless automatic
 closure was explicitly approved.
 -->
 
+## Workflow path and risk classification
+
+- [ ] Fast path: quick fix
+- [ ] Fast path: small task
+- [ ] Standard workflow
+- [ ] Critical or manually controlled workflow
+
+- Estimated classifier verdict and evidence:
+- Actual classifier verdict and evidence:
+- Correction cycles used:
+- Escalation reason, if any:
+
+<!--
+Fast-path changes must include the deterministic classifier evidence from both
+the estimate and the final diff. If eligibility changed during implementation,
+select Standard workflow and explain the escalation. Fast-path work allows at
+most one correction cycle.
+-->
+
 ## Problem and current behavior
 
 <!--
@@ -242,4 +261,3 @@ Not applicable.
 - [ ] Commit messages contain no AI-agent authorship or co-authorship attribution.
 - [ ] The PR is created as a draft.
 - [ ] Reviewers, assignees, labels, comments, merge, and auto-merge remain manual.
-

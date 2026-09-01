@@ -4,6 +4,14 @@ This repository uses a stack-agnostic, human-gated engineering workflow. Treat `
 
 At the start of bootstrap, ticket analysis, implementation, review, or testing, load `project-context`. It must read `.ai/project-rules.md` and the applicable module configuration before work continues. If `.ai/project.json` does not exist yet, use `/ai-bootstrap` and do not guess the project configuration.
 
+## Fast path
+
+Use `/quick-fix` for a bounded bug fix and `/small-task` for bounded documentation, local configuration, or mechanical work. Both commands must load `fast-path`, run `.ai/scripts/fast-path-check.ps1`, present one compact micro-plan, and wait for explicit approval before editing.
+
+Fast-path work is limited to one module, three files, 120 added-plus-deleted lines, deterministic verification, no prohibited risk category, and at most one correction cycle. Quick-fix diagnosis may read at most two relevant production files and two relevant test files. Any unclear root cause, scope expansion, public contract, dependency, migration, generated code, authentication, authorization, secrets, data integrity, concurrency, CI/CD, infrastructure, deployment, cloud, or cross-module impact requires `/ticket` and the standard workflow.
+
+The `quick-fix` agent may delegate only to the read-only `quick-reviewer`. A fast-path review receives only the requirement, approved micro-plan, exact diff, gate evidence, and classifier output. Fast-path completion never authorizes branch, commit, push, or pull-request operations.
+
 ## Instruction precedence
 
 When instructions conflict, apply them in this order:
@@ -26,7 +34,7 @@ Do not guess missing project conventions. Report uncertainty and ask for approva
 6. Implement only the approved scope.
 7. Run the exact deterministic quality commands from `.ai/project.json`.
 8. Obtain an independent read-only review.
-9. Correct BLOCKER and HIGH findings, then re-run the gate and review. Stop after three review cycles.
+9. Correct BLOCKER and HIGH findings, then re-run the gate and review. Stop after the configured maximum of three standard-workflow review cycles. Fast-path work always stops after one correction cycle.
 10. Present an explanation and PR description for human review.
 11. Only when the user explicitly requests delivery, use the dedicated `delivery` agent for one approved branch, commit, normal feature-branch push, or draft PR operation at a time.
 
@@ -53,6 +61,6 @@ Review findings use `BLOCKER`, `HIGH`, `MEDIUM`, `LOW`, or `NIT` and include fil
 
 ## Delivery and safety boundary
 
-All agents except `delivery` must never create branches, stage files, commit, push, or create pull requests. The `delivery` agent may perform exactly one explicitly approved operation through the managed `.ai/scripts/` safeguards: create a local feature branch, create one Conventional Commit from exact staged files, push the current feature branch normally, or create one draft pull request.
+All agents except `delivery` must never create branches, stage files, commit, push, or create pull requests. This includes `quick-fix` and `quick-reviewer`. The `delivery` agent may perform exactly one explicitly approved operation through the managed `.ai/scripts/` safeguards: create a local feature branch, create one Conventional Commit from exact staged files, push the current feature branch normally, or create one draft pull request.
 
 Each operation requires current PASS gate evidence, a review without BLOCKER or HIGH findings, an unchanged delivery check, and a new one-time human approval. Approval for one operation never authorizes the next. Never use force or force-with-lease, rewrite history, push tags, delete refs, update protected/shared branches, mark a PR ready, request reviewers, merge, release, deploy, mutate cloud infrastructure, or read/change secrets.

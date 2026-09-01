@@ -15,7 +15,7 @@ Compose project context without flooding the session or guessing conventions.
 3. Read `.ai/project-rules.md` and any `AGENTS.md` that governs the affected paths.
 4. Determine affected modules from paths and ticket evidence. If ambiguous, state the ambiguity.
 5. For each affected module, load exactly the skill IDs in `contextSkills`. Do not load every stack and architecture skill.
-6. Extract the module path, quality commands, boundaries, and applicable local rules.
+6. Extract the module path, quality commands, boundaries, applicable local rules, and fast-path limits when configured.
 
 ## Precedence
 

@@ -2,6 +2,14 @@
   "$schema": "./project.schema.json",
   "version": 1,
   "name": "example-monorepo",
+  "fastPath": {
+    "enabled": true,
+    "maximumFiles": 3,
+    "maximumLines": 120,
+    "maximumProductionFilesForDiagnosis": 2,
+    "maximumTestFilesForDiagnosis": 2,
+    "maximumCorrectionIterations": 1
+  },
   "review": {
     "maxIterations": 3,
     "diffBudget": {

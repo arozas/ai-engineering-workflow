@@ -53,3 +53,5 @@ For an applicable repository, present:
 8. Exploration ledger summary.
 
 Wait for explicit approval. On approval, write only the approved `.ai/project.json` and `.ai/project-rules.md`, validate JSON and schema consistency, then summarize corrections made by the user.
+
+Unless the user selects stricter limits, propose the schema defaults for `fastPath`: enabled, at most three files, at most 120 added-plus-deleted lines, at most two production and two test files during diagnosis, and exactly one correction iteration. Never propose values above the schema maxima.

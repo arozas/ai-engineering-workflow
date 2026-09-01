@@ -26,6 +26,7 @@
     { "action": "shell", "resource": "gh pr list *", "effect": "allow" },
     { "action": "shell", "resource": "gh pr diff *", "effect": "allow" },
     { "action": "shell", "resource": "pwsh -NoProfile -File .ai/scripts/delivery-check.ps1 *", "effect": "allow" },
+    { "action": "shell", "resource": "pwsh -NoProfile -File .ai/scripts/fast-path-check.ps1 *", "effect": "allow" },
     { "action": "shell", "resource": "git add *", "effect": "deny" },
     { "action": "shell", "resource": "git restore *", "effect": "deny" },
     { "action": "shell", "resource": "git switch *", "effect": "deny" },

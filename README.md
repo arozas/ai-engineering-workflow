@@ -20,6 +20,7 @@ The workflow turns tickets, specifications, and written requirements into eviden
 - [Installed project layout](#installed-project-layout)
 - [Bootstrap](#bootstrap)
 - [Working with tickets and specifications](#working-with-tickets-and-specifications)
+- [Fast path for small changes](#fast-path-for-small-changes)
 - [Agents](#agents)
 - [Model selection](#model-selection)
 - [Skills](#skills)
@@ -46,7 +47,8 @@ It provides:
 - Evidence-based detection of modules, languages, frameworks, architecture, tests, build systems, CI/CD, and repository conventions.
 - Ticket and specification analysis with testable acceptance criteria.
 - A mandatory human approval point before production code changes.
-- Specialized orchestrator, developer, reviewer, tester, and delivery agents.
+- Specialized orchestrator, developer, reviewer, tester, delivery, quick-fix, and quick-reviewer agents.
+- A deterministic, bounded fast path for low-risk bug fixes and small tasks.
 - Stack and architecture guidance loaded only when relevant.
 - Deterministic, exit-code-based quality gates.
 - Read-only Azure DevOps work-item retrieval.
@@ -69,6 +71,10 @@ Bootstrap and ticket analysis are read-only. The orchestrator must present a com
 ### Project context is selective
 
 The workflow does not load every stack and architecture skill into every session. `.ai/project.json` maps each module to the exact `contextSkills` that apply to it.
+
+### Workflow effort is proportional to risk
+
+Small, well-understood changes can use a bounded fast path with less context, one implementation agent, one read-only review, and at most one correction. Ambiguous, broad, cross-module, security-sensitive, contract-changing, migration, infrastructure, concurrency, data-integrity, dependency, or generated-code work must use the standard workflow.
 
 ### Quality results are factual
 
@@ -95,18 +101,22 @@ AI Engineering Workflow distribution
         v
 Application repository with OpenCode payload
         |
-        | /ai-bootstrap
+        | /ai-bootstrap once
         v
 Evidence-backed .ai/project.json + project rules
         |
-        | /ticket <ticket, spec, or requirement>
-        v
-Scoped implementation plan
-        |
-        | explicit human approval
-        v
-Developer -> deterministic gates -> tester -> read-only reviewer
-        |
+        +-------------------------------+
+        |                               |
+        | /quick-fix or /small-task     | /ticket <ticket, spec, or requirement>
+        v                               v
+Bounded classifier + micro-plan    Scoped implementation plan
+        |                               |
+        | explicit approval             | explicit approval
+        v                               v
+Quick fix -> gates -> quick review  Developer -> gates -> tester -> reviewer
+        |                               |
+        | eligible final diff           | standard correction policy
+        +---------------+---------------+
         v
 Explanation + detailed PR draft
         |
@@ -175,6 +185,7 @@ ai-engineering-workflow/
     │   ├── bootstrap-input.schema.json
     │   ├── workflow-installation.schema.json
     │   └── scripts/
+    │       ├── fast-path-check.ps1
     │       ├── delivery-check.ps1
     │       ├── create-branch.ps1
     │       ├── validate-commit-message.ps1
@@ -634,6 +645,8 @@ Examples:
 | --- | --- | --- |
 | `/ai-bootstrap` | Inspect the repository and propose project configuration. Writes approved `.ai` configuration only after consent. | No |
 | `/ticket` | Analyze a ticket, specification, or requirement and produce an approvable plan. | No |
+| `/quick-fix` | Classify and implement a well-understood, low-risk bug fix through the bounded fast path. | Yes, after micro-plan approval |
+| `/small-task` | Classify and implement a narrow documentation, test, or local configuration change through the bounded fast path. | Yes, after micro-plan approval |
 | `/implement` | Delegate the latest explicitly approved plan to the developer. | Yes, within approved scope |
 | `/test` | Derive acceptance scenarios, add tests only in recognized test paths, and run quality gates. | Tests only |
 | `/review` | Delegate an independent review against ticket, plan, diff, and gate evidence. | No |
@@ -647,17 +660,71 @@ Examples:
 
 Commands are intentionally composable. `/implement` does not silently start repeated developer/reviewer correction cycles unless the user has authorized the full workflow. Delivery approval never carries forward: approving a commit does not approve a push, and approving a push does not approve PR creation.
 
+## Fast path for small changes
+
+The fast path reduces coordination and context overhead for changes whose risk and scope are already understood. It is not a weaker quality mode: it keeps explicit approval, deterministic configured gates, a final scope recheck, and an independent read-only review. It saves tokens by loading fewer files, avoiding the full planning handoff chain, and limiting corrections; actual provider token usage still depends on the selected models, prompts, and repository content.
+
+Use `/quick-fix <problem>` for a reproducible bug with a known root cause. Use `/small-task <request>` for a narrow documentation, test-only, or local configuration task. Both commands run through the `quick-fix` primary agent and the `fast-path` skill.
+
+### Default eligibility policy
+
+A task is eligible only when all of these statements are true:
+
+- Acceptance criteria are clear and verification is available.
+- At most one configured project module is affected.
+- The estimate is no more than three changed files and 120 changed lines.
+- Diagnosis needs no more than two production files and two test files.
+- A quick fix has a known root cause; a small task may have no production module.
+- The task does not change a public contract or add a dependency.
+- It does not involve migrations, security-sensitive behavior, infrastructure, data integrity, concurrency, cross-module coordination, or generated code.
+- At most one correction cycle is needed.
+
+The repository can adopt stricter numeric limits through `fastPath` in `.ai/project.json`, but it cannot raise the schema ceilings. The deterministic evaluator is `.ai/scripts/fast-path-check.ps1`. Agents pass the observed facts to it before approval with `-Phase Estimate` and again against the final diff with `-Phase Actual`. Exit code `0` and `FAST_PATH_ELIGIBLE` permit the fast path; exit code `3` and `ESCALATE_STANDARD` require the standard workflow.
+
+Example estimate:
+
+```powershell
+pwsh -NoProfile -File .ai/scripts/fast-path-check.ps1 `
+  -TaskType QuickFix `
+  -Phase Estimate `
+  -ModuleCount 1 `
+  -FileCount 2 `
+  -LineCount 35 `
+  -AcceptanceClear `
+  -RootCauseKnown `
+  -VerificationAvailable
+```
+
+### Fast-path lifecycle
+
+1. The quick-fix agent loads project context and only the files allowed by the diagnosis budget.
+2. The classifier evaluates the estimate and risk flags.
+3. The agent presents a compact micro-plan, verification commands, and file/line estimate.
+4. The user explicitly approves implementation.
+5. The agent implements the smallest correct change and runs configured deterministic gates.
+6. The classifier rechecks the actual diff.
+7. The quick reviewer independently reviews the requirement, micro-plan, diff, gate evidence, and classifier evidence.
+8. One correction is allowed. Any second correction, BLOCKER/HIGH finding after correction, or loss of eligibility ends the fast path and returns a standard-workflow handoff summary.
+
+Fast-path approval authorizes only its micro-plan. It does not approve branch creation, commit, push, PR creation, merge, release, or deployment. The same separate delivery approvals and Conventional Commit requirements apply.
+
+### Automatic escalation
+
+Do not force a task to remain small. Use `/ticket` and the standard lifecycle when the classifier rejects the estimate, evidence invalidates the root cause, the actual diff exceeds a limit, an excluded risk appears, a configured quality gate fails for a reason that expands scope, or the quick review cannot be resolved in one correction. Existing evidence should be summarized for the standard orchestrator so work is not rediscovered unnecessarily.
+
 ## Agents
 
 | Agent | Mode | Responsibility | Important boundary |
 | --- | --- | --- | --- |
 | `orchestrator` | Primary | Loads project context, analyzes requirements, plans work, enforces approval, and coordinates other agents. | Cannot implement production code directly. During bootstrap it may edit only approved `.ai/project.json` and `.ai/project-rules.md`. |
+| `quick-fix` | Primary | Classifies, plans, implements, verifies, and closes bounded low-risk changes with minimal context. | Must reclassify the actual diff, permits one correction only, and delegates solely to `quick-reviewer`. |
+| `quick-reviewer` | Subagent | Performs a focused independent review of a fast-path diff and its evidence. | Read-only, eight-step budget, and no arbitrary shell access. |
 | `developer` | Subagent | Implements the explicitly approved plan using the smallest correct diff and project conventions. | Stops with `PLAN INVALIDATED` when evidence contradicts the plan; cannot launch subagents. |
 | `reviewer` | Subagent | Reviews correctness, security, architecture, regressions, tests, and scope independently. | Read-only; arbitrary shell and all file edits are denied. Only safe Git inspection commands are allowed. |
 | `tester` | Subagent | Converts acceptance criteria into scenarios and adds the smallest valuable tests. | May edit recognized test paths only; never production code. Returns `TESTABILITY ISSUE` when production changes are required. |
 | `delivery` | Subagent | Revalidates delivery state and performs one approved branch, commit, push, or draft PR operation through managed scripts. | Cannot edit files or use arbitrary shell; merge, force, protected branches, tags, releases, deployments, and secret/cloud mutations remain denied. |
 
-The orchestrator can delegate only to `developer`, `reviewer`, `tester`, `delivery`, and OpenCode's read-only `explore` agent.
+The standard orchestrator can delegate only to `developer`, `reviewer`, `tester`, `delivery`, and OpenCode's read-only `explore` agent. Fast-path commands select the `quick-fix` primary agent directly, avoiding an orchestrator handoff; that agent can delegate only to `quick-reviewer`.
 
 ## Model selection
 
@@ -694,6 +761,8 @@ Official references:
 | --- | --- | --- |
 | `orchestrator` | Frontier reasoning and tool-use model | The orchestrator interprets incomplete requirements, resolves repository evidence, produces bounded plans, coordinates specialized agents, and decides when human approval is required. Strong reasoning and reliable tool use matter more than low per-call cost. |
 | `developer` | Frontier coding model | The developer must understand an approved plan, navigate an existing codebase, preserve architecture and conventions, implement the smallest correct change, and diagnose quality-gate failures. Strong code generation and repository-scale context handling reduce rework. |
+| `quick-fix` | Fast, strong, cost-efficient coding model | This role handles only preclassified, single-module changes with a small context and diff budget. It still needs reliable diagnosis and editing, but a low-latency coding model usually provides a better cost/quality balance than the standard orchestrator/developer pair. |
+| `quick-reviewer` | Cost-efficient analytical model | The quick reviewer receives a compact evidence packet and a small diff. It needs disciplined defect detection and severity calibration, but not broad repository exploration or code generation. |
 | `reviewer` | Strong analytical and reasoning model | The reviewer must independently detect correctness, security, architecture, regression, and test-coverage problems without editing code. Analytical precision and calibrated severity are more important than generation speed. |
 | `tester` | Fast, cost-efficient coding model | Test work is usually narrower and more repetitive: translate acceptance criteria into scenarios, add focused tests in known locations, and report deterministic results. A reliable smaller model can often do this efficiently, provided it follows constraints and handles the target stack well. |
 | `delivery` | Deterministic, low-variance, cost-efficient tool-use model | Delivery operations are intentionally narrow and protected by deterministic scripts. The model should follow exact instructions, preserve arguments and file lists, and stop after one approved operation; creative implementation ability is unnecessary. |
@@ -732,7 +801,7 @@ permissions:
 ---
 ```
 
-Use the same `model` field in `reviewer.md`, `tester.md`, or `delivery.md` when those agents need explicit overrides. Model selection does not change permissions, step limits, approval requirements, read-only boundaries, or delivery safeguards.
+Use the same `model` field in `quick-fix.md`, `quick-reviewer.md`, `reviewer.md`, `tester.md`, or `delivery.md` when those agents need explicit overrides. Model selection does not change permissions, step limits, approval requirements, read-only boundaries, classifier limits, or delivery safeguards.
 
 ### Distribution default versus consumer customization
 
@@ -755,6 +824,7 @@ Skills are discovered from `.opencode/skills/` and loaded on demand.
 - `project-context`: validates `.ai/project.json`, reads project rules, resolves affected modules, and loads only their context skills.
 - `ticket-analysis`: converts requirements into traceable, testable acceptance criteria.
 - `implementation-plan`: produces the required human-approvable plan.
+- `fast-path`: classifies low-risk work, enforces minimal context and diff budgets, and defines the one-correction escalation policy.
 - `quality-gate`: runs exact configured commands and reports exit-based results.
 - `code-review`: defines structured independent review and severity rules.
 - `explain-changes`: prepares a human code-review walkthrough.
@@ -799,6 +869,14 @@ A simplified example:
       "filesMultiplier": 2,
       "linesMultiplier": 3
     }
+  },
+  "fastPath": {
+    "enabled": true,
+    "maximumFiles": 3,
+    "maximumLines": 120,
+    "maximumProductionFilesForDiagnosis": 2,
+    "maximumTestFilesForDiagnosis": 2,
+    "maximumCorrectionIterations": 1
   },
   "modules": [
     {
@@ -857,6 +935,21 @@ The optional diff budget compares actual implementation scope with the approved 
 - `linesMultiplier` defaults to 3.
 
 The developer stops and reports scope expansion when actual changed files exceed the configured file multiple or changed lines exceed the configured line multiple.
+
+### Fast-path policy
+
+`fastPath` is optional. When omitted, the fast-path skill uses the schema defaults shown above. Set `enabled` to `false` when a repository requires the standard workflow for every change.
+
+| Field | Allowed value | Meaning |
+| --- | --- | --- |
+| `enabled` | Boolean | Enables or disables fast-path classification for the repository. |
+| `maximumFiles` | 1 through 3 | Maximum total files in both the estimate and final diff. |
+| `maximumLines` | 1 through 120 | Maximum added plus deleted lines in both the estimate and final diff. |
+| `maximumProductionFilesForDiagnosis` | 1 through 2 | Maximum production files read during bounded diagnosis. |
+| `maximumTestFilesForDiagnosis` | 1 through 2 | Maximum test files read during bounded diagnosis. |
+| `maximumCorrectionIterations` | Exactly 1 | The single correction allowed before standard-workflow escalation. |
+
+These numeric settings only tighten scope. Risk exclusions are fixed by the fast-path skill and classifier and cannot be enabled through project configuration.
 
 ## Deterministic quality gates
 
@@ -1237,7 +1330,11 @@ Before releasing a change:
 - [ ] Local-to-Shared and untracked Shared-to-Local migrations preserve unrelated Git exclude rules.
 - [ ] An update aborts when a managed file was locally modified.
 - [ ] OpenCode discovers `orchestrator`, `developer`, `reviewer`, `tester`, and `delivery` in a consumer repository.
+- [ ] OpenCode discovers `quick-fix`, `quick-reviewer`, `/quick-fix`, and `/small-task` in a consumer repository.
 - [ ] The reviewer remains effectively read-only.
+- [ ] The quick reviewer remains read-only and the quick-fix agent cannot delegate to standard implementation agents.
+- [ ] The fast-path classifier accepts a compliant estimate and actual diff, and returns exit code 3 for every excluded risk and exceeded limit.
+- [ ] Fast-path work escalates after one correction or whenever the final diff loses eligibility.
 - [ ] Non-delivery agents cannot invoke managed mutation scripts.
 - [ ] The commit-message validator accepts valid Conventional Commits and rejects non-conventional or AI-attributed messages.
 - [ ] Branch creation rejects protected/shared names and a dirty working tree.
@@ -1304,6 +1401,14 @@ You launched `/ai-bootstrap` in the workflow distribution repository. Install or
 
 Bootstrap found no source/build evidence that can support a valid module. Add or generate the application first. This is expected for the `empty` preset before application files exist.
 
+### `ESCALATE_STANDARD`
+
+The deterministic fast-path classifier found an exceeded limit, missing prerequisite, or excluded risk. This is a routing verdict, not a failed implementation. Preserve the requirement, evidence, proposed files, and verification commands, then continue with `/ticket` and the standard workflow.
+
+### Fast path was invalidated after implementation
+
+The final diff no longer matches the approved fast-path estimate or a new risk appeared. Do not hide files, split a coherent change artificially, or weaken verification to satisfy the classifier. Stop fast-path work and provide the actual diff, gate results, review findings, and escalation reason to the standard orchestrator.
+
 ### Preset executable is missing
 
 Install the SDK or runtime required by the chosen preset and ensure it is available in the current terminal. The partial target directory is kept so that you can inspect what was created before the failure.
@@ -1345,6 +1450,8 @@ The workflow reports retrieval gaps and does not fall back to a write-capable op
 - File installation and updates perform full conflict preflight, but are not transactional against unexpected filesystem failures.
 - Local installations are intentionally clone-specific. A new clone must install the workflow again.
 - Local mode depends on `.git/info/exclude`; it cannot hide workflow paths that are already tracked.
+- Fast-path classification is deterministic for the facts supplied to the script, but the agent remains responsible for deriving those facts honestly from repository and task evidence.
+- The workflow reduces likely token usage through context and handoff limits but does not collect provider token telemetry or guarantee a fixed token cost.
 - OpenCode V2 is evolving; validate the distribution again after upgrading the CLI.
 
 ## OpenCode V2 compatibility

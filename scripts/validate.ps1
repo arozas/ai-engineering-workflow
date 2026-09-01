@@ -30,20 +30,60 @@ foreach ($required in @(
     'template\.ai\bootstrap-input.schema.json',
     'template\.ai\workflow-installation.schema.json',
     'template\.ai\pull-request-template.md',
+    'template\.ai\scripts\fast-path-check.ps1',
     'template\.ai\scripts\validate-commit-message.ps1',
     'template\.ai\scripts\commit-approved.ps1',
     'template\.ai\scripts\publish-approved.ps1',
     'template\.ai\scripts\create-draft-pr.ps1',
     'template\.opencode\agents\orchestrator.md',
+    'template\.opencode\agents\quick-fix.md',
+    'template\.opencode\agents\quick-reviewer.md',
     'template\.opencode\agents\delivery.md',
     'template\.opencode\commands\ai-bootstrap.md',
+    'template\.opencode\commands\quick-fix.md',
+    'template\.opencode\commands\small-task.md',
     'template\.opencode\commands\commit.md',
     'template\.opencode\commands\pr-create.md',
     'template\.opencode\skills\repo-bootstrap\SKILL.md',
+    'template\.opencode\skills\fast-path\SKILL.md',
     '.github\pull_request_template.md'
 )) {
     if (-not (Test-Path -LiteralPath (Join-Path $workflowRoot $required) -PathType Leaf)) {
         $errors += "Missing required file: $required"
+    }
+}
+
+$projectSchemaPath = Join-Path $workflowRoot 'template\.ai\project.schema.json'
+if (Test-Path -LiteralPath $projectSchemaPath -PathType Leaf) {
+    $projectSchema = Get-Content -LiteralPath $projectSchemaPath -Raw | ConvertFrom-Json
+    $fastPathSchema = $projectSchema.properties.fastPath
+    if ($null -eq $fastPathSchema) {
+        $errors += 'Project schema must define the optional fastPath policy.'
+    }
+    elseif ($fastPathSchema.properties.maximumFiles.maximum -ne 3 -or
+        $fastPathSchema.properties.maximumLines.maximum -ne 120 -or
+        $fastPathSchema.properties.maximumCorrectionIterations.const -ne 1) {
+        $errors += 'Fast-path schema limits must remain bounded to 3 files, 120 lines, and one correction.'
+    }
+}
+
+$openCodeConfigContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\opencode.json') -Raw
+if ($openCodeConfigContent -notmatch [regex]::Escape('pwsh -NoProfile -File .ai/scripts/fast-path-check.ps1 *')) {
+    $errors += 'opencode.json must allow the deterministic fast-path classifier.'
+}
+
+$quickFixAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\quick-fix.md') -Raw
+$quickReviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\quick-reviewer.md') -Raw
+if ($quickFixAgentContent -notmatch '(?m)^steps:\s*16\s*$') {
+    $errors += 'quick-fix agent must keep its bounded 16-step budget.'
+}
+if ($quickReviewerAgentContent -notmatch '(?m)^steps:\s*8\s*$') {
+    $errors += 'quick-reviewer agent must keep its bounded 8-step budget.'
+}
+foreach ($commandName in @('quick-fix', 'small-task')) {
+    $commandContent = Get-Content -LiteralPath (Join-Path $workflowRoot "template\.opencode\commands\$commandName.md") -Raw
+    if ($commandContent -notmatch '(?m)^agent:\s*quick-fix\s*$') {
+        $errors += "$commandName command must run through the quick-fix agent."
     }
 }
 

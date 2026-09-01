@@ -9,6 +9,18 @@
     "$schema": { "type": "string" },
     "version": { "const": 1 },
     "name": { "type": "string", "minLength": 1 },
+    "fastPath": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "maximumFiles": { "type": "integer", "minimum": 1, "maximum": 3, "default": 3 },
+        "maximumLines": { "type": "integer", "minimum": 1, "maximum": 120, "default": 120 },
+        "maximumProductionFilesForDiagnosis": { "type": "integer", "minimum": 1, "maximum": 2, "default": 2 },
+        "maximumTestFilesForDiagnosis": { "type": "integer", "minimum": 1, "maximum": 2, "default": 2 },
+        "maximumCorrectionIterations": { "const": 1, "default": 1 }
+      }
+    },
     "review": {
       "type": "object",
       "additionalProperties": false,
