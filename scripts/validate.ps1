@@ -32,11 +32,14 @@ foreach ($required in @(
     'template\AGENTS.md',
     'template\opencode.json',
     'template\.ai\project.schema.json',
+    'template\.ai\project-profile.schema.json',
+    'template\.ai\generated-skills.schema.json',
     'template\.ai\bootstrap-input.schema.json',
     'template\.ai\workflow-installation.schema.json',
     'template\.ai\workflow-run.schema.json',
     'template\.ai\pull-request-template.md',
     'template\.ai\scripts\fast-path-check.ps1',
+    'template\.ai\scripts\profile-project.ps1',
     'template\.ai\scripts\validate-project.ps1',
     'template\.ai\scripts\workflow-state.ps1',
     'template\.ai\scripts\validate-commit-message.ps1',
@@ -50,12 +53,15 @@ foreach ($required in @(
     'template\.opencode\commands\ai-bootstrap.md',
     'template\.opencode\commands\quick-fix.md',
     'template\.opencode\commands\small-task.md',
+    'template\.opencode\commands\ai-refresh.md',
     'template\.opencode\commands\run-status.md',
     'template\.opencode\commands\commit.md',
     'template\.opencode\commands\pr-create.md',
     'template\.opencode\skills\repo-bootstrap\SKILL.md',
     'template\.opencode\skills\fast-path\SKILL.md',
     'template\.opencode\skills\workflow-state\SKILL.md',
+    'template\.opencode\skills\project-profiler\SKILL.md',
+    'template\.opencode\skills\project-skill-builder\SKILL.md',
     '.github\pull_request_template.md'
 )) {
     if (-not (Test-Path -LiteralPath (Join-Path $workflowRoot $required) -PathType Leaf)) {
@@ -100,7 +106,7 @@ $openCodeConfigContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'temp
 if ($openCodeConfigContent -notmatch [regex]::Escape('pwsh -NoProfile -File .ai/scripts/fast-path-check.ps1 *')) {
     $errors += 'opencode.json must allow the deterministic fast-path classifier.'
 }
-foreach ($managedScript in @('validate-project.ps1', 'workflow-state.ps1')) {
+foreach ($managedScript in @('validate-project.ps1', 'workflow-state.ps1', 'profile-project.ps1')) {
     if ($openCodeConfigContent -notmatch [regex]::Escape("pwsh -NoProfile -File .ai/scripts/$managedScript *")) {
         $errors += "opencode.json must allow managed script $managedScript."
     }

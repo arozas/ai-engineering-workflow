@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Project-generated skills manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "repositoryFingerprint", "generatedAtUtc", "skills"],
+  "properties": {
+    "version": { "const": 1 },
+    "repositoryFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "generatedAtUtc": { "type": "string", "format": "date-time" },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "moduleId", "path", "confidence", "reason", "composedWith", "evidence"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^project-[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "moduleId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "path": { "type": "string", "pattern": "^\\.opencode/skills/project-[a-z0-9]+(?:-[a-z0-9]+)*/SKILL\\.md$" },
+          "confidence": { "enum": ["HIGH", "MEDIUM", "LOW"] },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "composedWith": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+            "uniqueItems": true
+          },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "claim"],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(?![\\/])(?!.*(?:^|[\\/])\\.\\.(?:[\\/]|$)).+$"
+                },
+                "claim": { "type": "string", "minLength": 1, "maxLength": 1000 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

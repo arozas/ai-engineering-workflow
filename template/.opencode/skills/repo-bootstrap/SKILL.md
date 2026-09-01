@@ -8,6 +8,8 @@ compatibility: opencode-v2
 
 Bootstrap is read-only until the user explicitly approves the complete proposal. Never infer a convention merely because it is fashionable. Existing files and executable project metadata are stronger evidence than directory names.
 
+Load `project-profiler` and `project-skill-builder`. The installer remains deterministic and model-independent; repository personalization belongs to this approved bootstrap phase.
+
 ## Mandatory empty-repository fast path
 
 The calling command should already have inventoried files outside `AGENTS.md`, `opencode.json`, `.ai/**`, and `.opencode/**`. If that inventory is empty, return `NO PROJECT MODULES DETECTED` immediately. Do not read more files or perform language-specific searches.
@@ -24,7 +26,7 @@ If no application module is supported after the inventory and manifest pass, sto
 
 Use a bounded, non-repeating scan:
 
-1. Reuse the caller's repository inventory; do not create another equivalent inventory.
+1. Reuse the caller's deterministic profile and repository inventory; do not run the profiler or create another equivalent inventory before approval.
 2. Perform one manifest/configuration pass, reading at most 20 relevant manifests, workspace files, CI/CD files, and existing instruction files.
 3. For each candidate module, read at most three representative source files and three representative test files, capped at 18 representative files overall.
 4. Never read the same file twice and never repeat an equivalent glob, search, or directory listing.
@@ -34,6 +36,8 @@ Use a bounded, non-repeating scan:
 ## Inspect
 
 Within the budget, look for repository/workspace markers, languages, frameworks, dependency direction, exact quality commands, tests, migrations, CI/CD, infrastructure, module boundaries, and nested instructions.
+
+Reuse the profile returned by the calling command: inventory, manifest hashes, module candidates, language counts, structural markers, tests, CI, conventions, and structure fingerprint. Do not repeat equivalent searches already answered by the profile. The only second profiler execution is the approved persistence step, which also detects drift between proposal and write.
 
 Common evidence includes `*.sln`, `*.csproj`, `global.json`, `package.json`, lockfiles, `pnpm-workspace.yaml`, `pom.xml`, `build.gradle*`, `pyproject.toml`, `requirements*.txt`, `go.mod`, `Cargo.toml`, `Dockerfile*`, and pipeline files. This list is guidance, not a closed list.
 
@@ -50,8 +54,10 @@ For an applicable repository, present:
 5. Risks, unknowns, and questions.
 6. A complete `.ai/project.json` conforming to `.ai/project.schema.json`.
 7. Proposed project-rule changes.
-8. Exploration ledger summary.
+8. A complete `.ai/generated-skills.json`, including an empty `skills` array when no custom skill is justified.
+9. Full proposed contents of each minimal `project-<module-id>` skill, with evidence and confidence.
+10. Exploration ledger summary and deterministic structure fingerprint.
 
-Wait for explicit approval. On approval, write only the approved `.ai/project.json` and `.ai/project-rules.md`, run `.ai/scripts/validate-project.ps1`, and report `PROJECT_VALID` before summarizing corrections made by the user. A failed deterministic validation blocks bootstrap completion.
+Wait for explicit approval. On approval, rerun `.ai/scripts/profile-project.ps1 -OutputPath .ai/project-profile.json`; stop if its fingerprint differs from the approved proposal. Then write only the approved `.ai/project.json`, `.ai/project-rules.md`, `.ai/generated-skills.json`, and approved project skill files. Run `.ai/scripts/validate-project.ps1` and report `PROJECT_VALID` before summarizing corrections made by the user. A failed deterministic validation blocks bootstrap completion.
 
 Unless the user selects stricter limits, propose the schema defaults for `fastPath`: enabled, at most three files, at most 120 added-plus-deleted lines, at most two production and two test files during diagnosis, and exactly one correction iteration. Never propose values above the schema maxima.

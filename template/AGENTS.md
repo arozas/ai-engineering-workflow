@@ -2,7 +2,7 @@
 
 This repository uses a stack-agnostic, human-gated engineering workflow. Treat `.ai/project.json` as the machine-readable source of project modules and quality commands after bootstrap. Treat `.ai/project-rules.md` as the highest-authority project guidance.
 
-At the start of bootstrap, ticket analysis, implementation, review, or testing, load `project-context`. It must read `.ai/project-rules.md` and the applicable module configuration before work continues. If `.ai/project.json` does not exist yet, use `/ai-bootstrap` and do not guess the project configuration.
+At the start of bootstrap, ticket analysis, implementation, review, or testing, load `project-context`. It must read `.ai/project-rules.md` and the applicable module configuration before work continues. If `.ai/project.json` does not exist yet, use `/ai-bootstrap` and do not guess the project configuration. Use `/ai-refresh` when the persisted repository profile reports structural drift; never regenerate project skills inside a delivery task.
 
 ## Fast path
 

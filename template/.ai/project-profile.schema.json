@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Deterministic repository profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "structureFingerprint",
+    "scannedAtUtc",
+    "headSha",
+    "fileCount",
+    "languages",
+    "manifests",
+    "moduleCandidates",
+    "architectureMarkers",
+    "ciFiles",
+    "testFiles",
+    "conventionFiles"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "structureFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "scannedAtUtc": { "type": "string", "format": "date-time" },
+    "headSha": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|UNBORN)$" },
+    "fileCount": { "type": "integer", "minimum": 1 },
+    "languages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "fileCount", "samplePaths"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+          "fileCount": { "type": "integer", "minimum": 1 },
+          "samplePaths": { "$ref": "#/$defs/paths" }
+        }
+      }
+    },
+    "manifests": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidenceFile" }
+    },
+    "moduleCandidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "evidence"],
+        "properties": {
+          "path": { "$ref": "#/$defs/path" },
+          "evidence": { "$ref": "#/$defs/paths" }
+        }
+      }
+    },
+    "architectureMarkers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["marker", "paths"],
+        "properties": {
+          "marker": { "enum": ["domain", "application", "infrastructure", "ports", "adapters", "features", "events"] },
+          "paths": { "$ref": "#/$defs/paths" }
+        }
+      }
+    },
+    "ciFiles": { "$ref": "#/$defs/paths" },
+    "testFiles": { "$ref": "#/$defs/paths" },
+    "conventionFiles": { "$ref": "#/$defs/paths" }
+  },
+  "$defs": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![\\/])(?!.*(?:^|[\\/])\\.\\.(?:[\\/]|$)).+$"
+    },
+    "paths": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/path" },
+      "uniqueItems": true
+    },
+    "evidenceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kind", "sha256"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "kind": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

@@ -128,10 +128,13 @@ function Get-LocalExcludePatterns {
     $sharedPaths = @('.ai/project-rules.md', '.ai/project.json')
     $generatedPaths = @(
         '.ai/bootstrap-input.json',
+        '.ai/generated-skills.json',
         '.ai/pr-draft.md',
+        '.ai/project-profile.json',
         '.ai/project.json',
         '.ai/workflow-installation.json',
-        '.ai/workflow-installation.json.tmp'
+        '.ai/workflow-installation.json.tmp',
+        '.opencode/skills/project-*/'
     )
 
     $paths = @(

@@ -36,8 +36,9 @@ try {
 
     $sourceRoot = Join-Path $repositoryRoot 'src\app'
     New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
-    Set-Content -LiteralPath (Join-Path $sourceRoot 'app.txt') -Value 'before' -Encoding utf8
-    & git -C $repositoryRoot add -- 'src/app/app.txt'
+    Set-Content -LiteralPath (Join-Path $sourceRoot 'app.js') -Value 'export const value = "before";' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $sourceRoot 'package.json') -Value '{"name":"workflow-test-app","private":true}' -Encoding utf8
+    & git -C $repositoryRoot add -- 'src/app/app.js' 'src/app/package.json'
     & git -C $repositoryRoot commit -m 'test: create fixture' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Unable to commit test fixture.' }
 
@@ -47,7 +48,59 @@ try {
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-Mode', 'Local') | Out-Null
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local installation remains invisible to Git.'
     $metadata = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\workflow-installation.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($metadata.workflowVersion -eq '1.4.2') -Message 'Installed metadata records version 1.4.2.'
+    Assert-True -Condition ($metadata.workflowVersion -eq '1.5.0') -Message 'Installed metadata records version 1.5.0.'
+
+    $profileScript = Join-Path $repositoryRoot '.ai\scripts\profile-project.ps1'
+    $profileOutput = Invoke-PowerShell -ScriptPath $profileScript -Arguments @('-OutputPath', '.ai/project-profile.json') -WorkingDirectory $repositoryRoot
+    $profile = ($profileOutput -join "`n") | ConvertFrom-Json
+    Assert-True -Condition ($profile.fileCount -eq 2 -and $profile.structureFingerprint -match '^[a-f0-9]{64}$' -and $profile.languages.id -contains 'javascript' -and $profile.moduleCandidates.path -contains 'src/app') -Message 'The deterministic profiler identifies application files, languages, module candidates, and a stable fingerprint.'
+    Invoke-PowerShell -ScriptPath $profileScript -Arguments @('-OutputPath', 'src/app/forbidden-profile.json') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $sourceRoot 'forbidden-profile.json'))) -Message 'The profiler cannot use its approved output option to overwrite application paths.'
+
+    $projectSkillRoot = Join-Path $repositoryRoot '.opencode\skills\project-app'
+    New-Item -ItemType Directory -Path $projectSkillRoot -Force | Out-Null
+    @'
+---
+name: project-app
+description: Project-specific rules for the workflow test application
+compatibility: opencode-v2
+---
+
+## Scope
+
+Applies to `src/app`.
+
+## Evidence
+
+- `src/app/app.js` and `src/app/package.json` establish the application fixture.
+
+## Rules
+
+- Keep fixture behavior inside `src/app`.
+
+## Quality and testing
+
+- Run the configured PowerShell verification command.
+
+## Unknowns
+
+- No framework is established by repository evidence.
+'@ | Set-Content -LiteralPath (Join-Path $projectSkillRoot 'SKILL.md') -Encoding utf8
+
+    [ordered]@{
+        version = 1
+        repositoryFingerprint = [string]$profile.structureFingerprint
+        generatedAtUtc = [DateTime]::UtcNow.ToString('o')
+        skills = @([ordered]@{
+            id = 'project-app'
+            moduleId = 'app'
+            path = '.opencode/skills/project-app/SKILL.md'
+            confidence = 'HIGH'
+            reason = 'The application fixture has a repository-specific module boundary.'
+            composedWith = @()
+            evidence = @([ordered]@{ path = 'src/app/app.js'; claim = 'This tracked source file establishes the fixture module.' })
+        })
+    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\generated-skills.json') -Encoding utf8
 
     $project = [ordered]@{
         '$schema' = './project.schema.json'
@@ -55,19 +108,35 @@ try {
         name = 'workflow-test-consumer'
         fastPath = [ordered]@{ enabled = $true; maximumFiles = 3; maximumLines = 120; maximumProductionFilesForDiagnosis = 2; maximumTestFilesForDiagnosis = 2; maximumCorrectionIterations = 1 }
         review = [ordered]@{ maxIterations = 2; diffBudget = [ordered]@{ filesMultiplier = 2; linesMultiplier = 3 } }
+        profile = [ordered]@{ repositoryFingerprint = [string]$profile.structureFingerprint; analyzedAtUtc = [DateTime]::UtcNow.ToString('o'); source = '.ai/project-profile.json'; generatedSkillsManifest = '.ai/generated-skills.json' }
         modules = @([ordered]@{
             id = 'app'
             path = 'src/app'
             languages = @('text')
             frameworks = @()
             architectures = @()
-            contextSkills = @()
+            contextSkills = @('project-app')
             quality = [ordered]@{ restore = @(); build = @(); lint = @(); typecheck = @(); test = @('pwsh -NoProfile -Command "exit 0"'); e2e = @() }
         })
     }
     $project | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\project.json') -Encoding utf8
     Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\validate-project.ps1') -Arguments @() -WorkingDirectory $repositoryRoot | Out-Null
-    Assert-True -Condition $true -Message 'A valid project configuration passes deterministic schema validation.'
+    Assert-True -Condition $true -Message 'A profiled project and generated module skill pass deterministic validation.'
+    Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local personalization artifacts remain invisible to Git.'
+
+    $ordinarySource = Join-Path $sourceRoot 'ordinary.txt'
+    Set-Content -LiteralPath $ordinarySource -Value 'ordinary source growth' -Encoding utf8
+    $ordinaryProfileOutput = Invoke-PowerShell -ScriptPath $profileScript -Arguments @() -WorkingDirectory $repositoryRoot
+    $ordinaryProfile = ($ordinaryProfileOutput -join "`n") | ConvertFrom-Json
+    Remove-Item -LiteralPath $ordinarySource -Force
+    Assert-True -Condition ($ordinaryProfile.structureFingerprint -eq $profile.structureFingerprint) -Message 'Ordinary source growth inside known structure does not force profile regeneration.'
+
+    $domainRoot = Join-Path $sourceRoot 'domain'
+    New-Item -ItemType Directory -Path $domainRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $domainRoot 'model.txt') -Value 'structural drift' -Encoding utf8
+    Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\validate-project.ps1') -Arguments @() -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Remove-Item -LiteralPath $domainRoot -Recurse -Force
+    Assert-True -Condition $true -Message 'A new architecture marker invalidates the persisted profile and requires ai-refresh.'
 
     $invalidProjectPath = Join-Path $repositoryRoot '.ai\invalid-project.json'
     $invalid = ($project | ConvertTo-Json -Depth 8 | ConvertFrom-Json -AsHashtable)
@@ -83,11 +152,11 @@ try {
     $stateScript = Join-Path $repositoryRoot '.ai\scripts\workflow-state.ps1'
     $runId = 'quick-fixture-change'
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $runId, '-WorkflowPath', 'fast-path', '-TaskType', 'QuickFix', '-ArtifactPath', '.ai/runtime/requirement.md') -WorkingDirectory $repositoryRoot | Out-Null
-    $approvedPlan = 'Change src/app/app.txt, add src/app/new.txt, and verify both files.'
+    $approvedPlan = 'Change src/app/app.js, add src/app/new.txt, and verify both files.'
     Set-Content -LiteralPath (Join-Path $runtimeRoot 'plan.md') -Value $approvedPlan -Encoding utf8
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $runId, '-ArtifactPath', '.ai/runtime/plan.md') -WorkingDirectory $repositoryRoot | Out-Null
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-Null
-    Set-Content -LiteralPath (Join-Path $sourceRoot 'app.txt') -Value 'after' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $sourceRoot 'app.js') -Value 'export const value = "after";' -Encoding utf8
     Set-Content -LiteralPath (Join-Path $sourceRoot 'new.txt') -Value 'new file' -Encoding utf8
 
     $classifier = Join-Path $repositoryRoot '.ai\scripts\fast-path-check.ps1'
@@ -110,7 +179,7 @@ try {
     $ready = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Validate', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
     Assert-True -Condition ($ready.status -eq 'READY_FOR_DELIVERY') -Message 'Approved plan, gates, and review reach READY_FOR_DELIVERY.'
 
-    & git -C $repositoryRoot add -- 'src/app/app.txt' 'src/app/new.txt'
+    & git -C $repositoryRoot add -- 'src/app/app.js' 'src/app/new.txt'
     & git -C $repositoryRoot commit -m 'test: update fixture' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Unable to create state-machine test commit.' }
     $commitSha = (& git -C $repositoryRoot rev-parse HEAD).Trim()

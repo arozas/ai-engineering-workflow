@@ -36,6 +36,17 @@
         }
       }
     },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryFingerprint", "analyzedAtUtc", "source", "generatedSkillsManifest"],
+      "properties": {
+        "repositoryFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "analyzedAtUtc": { "type": "string", "format": "date-time" },
+        "source": { "const": ".ai/project-profile.json" },
+        "generatedSkillsManifest": { "const": ".ai/generated-skills.json" }
+      }
+    },
     "modules": {
       "type": "array",
       "minItems": 1,
