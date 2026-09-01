@@ -3,11 +3,22 @@
   "title": "AI Engineering Workflow installation metadata",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "workflowName", "workflowVersion", "installedAtUtc", "managedFiles"],
+  "required": ["schemaVersion", "workflowName", "workflowVersion", "installationMode", "shareProjectContext", "localExcludedPaths", "installedAtUtc", "managedFiles"],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "workflowName": { "const": "ai-engineering-workflow" },
     "workflowVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "installationMode": { "enum": ["local", "shared"] },
+    "shareProjectContext": { "type": "boolean" },
+    "localExcludedPaths": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?![\\\\/])(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+      }
+    },
     "installedAtUtc": { "type": "string", "format": "date-time" },
     "managedFiles": {
       "type": "array",
@@ -21,5 +32,22 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "installationMode": { "const": "local" } },
+        "required": ["installationMode"]
+      },
+      "then": {
+        "properties": { "localExcludedPaths": { "minItems": 1 } }
+      },
+      "else": {
+        "properties": {
+          "shareProjectContext": { "const": false },
+          "localExcludedPaths": { "maxItems": 0 }
+        }
+      }
+    }
+  ]
 }

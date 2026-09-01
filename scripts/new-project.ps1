@@ -4,6 +4,8 @@ param(
     [string]$ParentPath,
     [string]$Preset = 'empty',
     [string]$Architecture,
+    [ValidateSet('Local', 'Shared')][string]$Mode = 'Local',
+    [switch]$ShareProjectContext,
     [switch]$InitializeGit,
     [switch]$DryRun,
     [switch]$ListPresets
@@ -45,6 +47,9 @@ if ([string]::IsNullOrWhiteSpace($Name) -or [string]::IsNullOrWhiteSpace($Parent
 }
 if ($Name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
     throw 'Name may contain only letters, numbers, dot, underscore, and hyphen, and must start with a letter or number.'
+}
+if ($Mode -eq 'Shared' -and $ShareProjectContext) {
+    throw 'ShareProjectContext is valid only with Mode Local.'
 }
 
 $parentFull = [System.IO.Path]::GetFullPath($ParentPath).TrimEnd('\', '/')
@@ -88,6 +93,8 @@ $tokens = @{
 Write-Host "Project: $Name"
 Write-Host "Target: $targetRoot"
 Write-Host "Preset: $Preset"
+Write-Host "Workflow installation mode: $Mode"
+Write-Host "Share project context: $($Mode -eq 'Local' -and $ShareProjectContext.IsPresent)"
 Write-Host "Architecture: $(if ($architectureDefinition) { $architectureDefinition.id } else { 'not specified' })"
 if ($presetDefinition.networkRequired) {
     Write-Host 'Network: required by this preset'
@@ -95,6 +102,9 @@ if ($presetDefinition.networkRequired) {
 
 if ($DryRun) {
     Write-Host 'DRY RUN: target is available and preset validation passed.'
+    if ($Mode -eq 'Local') {
+        Write-Host '  Git will be initialized because local workflow installation requires a repository-local exclude file.'
+    }
     foreach ($command in @($presetDefinition.commands)) {
         $arguments = @($command.arguments | ForEach-Object { Expand-WorkflowTokens -Value $_ -Tokens $tokens })
         Write-Host ('  ' + $command.executable + ' ' + ($arguments -join ' '))
@@ -152,7 +162,32 @@ foreach ($command in @($presetDefinition.commands)) {
     }
 }
 
-& (Join-Path $PSScriptRoot 'install.ps1') -TargetPath $targetRoot
+$shouldInitializeGit = $InitializeGit.IsPresent -or $Mode -eq 'Local'
+if ($shouldInitializeGit) {
+    $gitCommand = Get-Command git -ErrorAction SilentlyContinue
+    if ($null -eq $gitCommand) {
+        throw "Git is required for the selected options. The partial project was left at $targetRoot"
+    }
+
+    & $gitCommand.Source -C $targetRoot rev-parse --show-toplevel *> $null
+    if ($LASTEXITCODE -ne 0) {
+        & $gitCommand.Source -C $targetRoot init -b main
+        if ($LASTEXITCODE -ne 0) {
+            throw "Git initialization failed. The partial project was left at $targetRoot"
+        }
+    }
+    $gitTopLevel = @(& $gitCommand.Source -C $targetRoot rev-parse --show-toplevel)
+    if ($LASTEXITCODE -ne 0 -or $gitTopLevel.Count -ne 1 -or
+        [System.IO.Path]::GetFullPath([string]$gitTopLevel[0]).TrimEnd('\', '/') -ne $targetRoot) {
+        throw "The generated project is not the root of its Git repository: $targetRoot"
+    }
+}
+
+$shareContext = $ShareProjectContext.IsPresent
+& (Join-Path $PSScriptRoot 'install.ps1') `
+    -TargetPath $targetRoot `
+    -Mode $Mode `
+    -ShareProjectContext:$shareContext
 
 $bootstrapInput = [ordered]@{
     '$schema' = './bootstrap-input.schema.json'
@@ -165,15 +200,9 @@ $bootstrapInput = [ordered]@{
 }
 $bootstrapInput | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $targetRoot '.ai\bootstrap-input.json') -Encoding utf8
 
-if ($InitializeGit) {
-    $gitCommand = Get-Command git -ErrorAction SilentlyContinue
-    if ($null -eq $gitCommand) {
-        throw "Git was requested but is not installed. The project is otherwise ready at $targetRoot"
-    }
-    & $gitCommand.Source -C $targetRoot init -b main
-    if ($LASTEXITCODE -ne 0) {
-        throw "Git initialization failed. The project is otherwise ready at $targetRoot"
-    }
+if ($Mode -eq 'Local') {
+    $gitRepository = Get-GitRepositoryInfo -TargetRoot $targetRoot
+    Assert-LocalPathsIgnored -GitRepository $gitRepository -RelativePaths @('.ai/bootstrap-input.json')
 }
 
 Write-Host "Project created: $targetRoot"

@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$TargetPath,
+    [ValidateSet('Local', 'Shared')][string]$Mode = 'Local',
+    [switch]$ShareProjectContext,
     [switch]$DryRun
 )
 
@@ -10,6 +12,28 @@ $ErrorActionPreference = 'Stop'
 $targetRoot = Resolve-WorkflowTarget -TargetPath $TargetPath -MustExist
 $entries = @(Get-TemplateFileRecords)
 $metadataPath = Get-InstallationMetadataPath -TargetRoot $targetRoot
+$gitRepository = $null
+$excludePatterns = @()
+$localPaths = @()
+$gitStatusBefore = $null
+
+if ($Mode -eq 'Shared' -and $ShareProjectContext) {
+    throw 'ShareProjectContext is valid only with Mode Local.'
+}
+
+if ($Mode -eq 'Local') {
+    $gitRepository = Get-GitRepositoryInfo -TargetRoot $targetRoot
+    $excludePatterns = @(Get-LocalExcludePatterns -ManagedFiles $entries -ShareProjectContext $ShareProjectContext.IsPresent)
+    $localPaths = @($excludePatterns | ForEach-Object { $_.TrimStart('/') })
+    $trackedLocalPaths = @(Test-LocalPathsAreUntracked -GitRepository $gitRepository -RelativePaths $localPaths)
+    if ($trackedLocalPaths.Count -gt 0) {
+        Write-Host 'Tracked paths cannot be hidden by a local installation:'
+        $trackedLocalPaths | ForEach-Object { Write-Host "  - $_" }
+        throw 'Local installation aborted. Use Mode Shared or untrack the listed paths deliberately.'
+    }
+    Get-WorkflowExcludeBlockState -ExcludePath $gitRepository.ExcludePath | Out-Null
+    $gitStatusBefore = Get-GitStatusSnapshot -GitRepository $gitRepository
+}
 
 $conflicts = @()
 foreach ($entry in $entries) {
@@ -24,6 +48,8 @@ if (Test-Path -LiteralPath $metadataPath) {
 
 Write-Host "Workflow version: $(Get-WorkflowVersion)"
 Write-Host "Target: $targetRoot"
+Write-Host "Installation mode: $Mode"
+Write-Host "Share project context: $($Mode -eq 'Local' -and $ShareProjectContext.IsPresent)"
 Write-Host "Template files: $($entries.Count)"
 
 if ($conflicts.Count -gt 0) {
@@ -34,6 +60,10 @@ if ($conflicts.Count -gt 0) {
 
 if ($DryRun) {
     Write-Host 'DRY RUN: installation can proceed without conflicts.'
+    if ($Mode -eq 'Local') {
+        Write-Host "Git exclude file: $($gitRepository.ExcludePath)"
+        Write-Host "Locally excluded paths: $($excludePatterns.Count)"
+    }
     return
 }
 
@@ -46,9 +76,35 @@ foreach ($entry in $entries) {
     Copy-Item -LiteralPath $entry.Source -Destination $destination
 }
 
-Write-InstallationMetadata -TargetRoot $targetRoot -ManagedFiles $entries
+if ($Mode -eq 'Local') {
+    Set-WorkflowGitExclude -ExcludePath $gitRepository.ExcludePath -Mode Local -Patterns $excludePatterns
+}
+
+Write-InstallationMetadata `
+    -TargetRoot $targetRoot `
+    -ManagedFiles $entries `
+    -InstallationMode $Mode `
+    -ShareProjectContext ($Mode -eq 'Local' -and $ShareProjectContext.IsPresent) `
+    -LocalExcludedPaths $localPaths
+
+if ($Mode -eq 'Local') {
+    Assert-LocalPathsIgnored -GitRepository $gitRepository -RelativePaths $localPaths
+    $gitStatusAfter = Get-GitStatusSnapshot -GitRepository $gitRepository
+    if (-not $ShareProjectContext -and $gitStatusAfter -ne $gitStatusBefore) {
+        throw 'Local installation changed the Git-visible working-tree status unexpectedly. Inspect the target before continuing.'
+    }
+}
 
 Write-Host "Installed $($entries.Count) template files in $targetRoot"
+if ($Mode -eq 'Local') {
+    Write-Host 'Workflow files are available to OpenCode but excluded only in this Git clone.'
+    if ($ShareProjectContext) {
+        Write-Host 'Project context sharing is enabled: .ai/project-rules.md and generated .ai/project.json remain Git-visible.'
+    }
+}
+else {
+    Write-Host 'Shared mode selected: workflow files remain Git-visible for optional version control.'
+}
 Write-Host 'Next:'
 Write-Host "  cd `"$targetRoot`""
 Write-Host '  opencode2'

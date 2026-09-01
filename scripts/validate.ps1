@@ -20,6 +20,10 @@ foreach ($forbidden in @('AGENTS.md', 'opencode.json', '.ai', '.opencode')) {
 }
 
 foreach ($required in @(
+    'scripts\Workflow.Common.ps1',
+    'scripts\install.ps1',
+    'scripts\new-project.ps1',
+    'scripts\update.ps1',
     'template\AGENTS.md',
     'template\opencode.json',
     'template\.ai\project.schema.json',
@@ -35,12 +39,35 @@ foreach ($required in @(
     'template\.opencode\commands\ai-bootstrap.md',
     'template\.opencode\commands\commit.md',
     'template\.opencode\commands\pr-create.md',
-    'template\.opencode\skills\repo-bootstrap\SKILL.md'
+    'template\.opencode\skills\repo-bootstrap\SKILL.md',
     '.github\pull_request_template.md'
 )) {
     if (-not (Test-Path -LiteralPath (Join-Path $workflowRoot $required) -PathType Leaf)) {
         $errors += "Missing required file: $required"
     }
+}
+
+$installationSchemaPath = Join-Path $workflowRoot 'template\.ai\workflow-installation.schema.json'
+if (Test-Path -LiteralPath $installationSchemaPath -PathType Leaf) {
+    $installationSchema = Get-Content -LiteralPath $installationSchemaPath -Raw | ConvertFrom-Json
+    if ($installationSchema.properties.schemaVersion.const -ne 2) {
+        $errors += 'Installation metadata schema must require schemaVersion 2.'
+    }
+    foreach ($propertyName in @('installationMode', 'shareProjectContext', 'localExcludedPaths')) {
+        if ($installationSchema.required -notcontains $propertyName) {
+            $errors += "Installation metadata schema must require '$propertyName'."
+        }
+    }
+}
+
+$installScriptContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\install.ps1') -Raw
+if ($installScriptContent -notmatch "\[ValidateSet\('Local', 'Shared'\)\]\[string\]\`$Mode = 'Local'") {
+    $errors += 'install.ps1 must default to Local and explicitly support Shared mode.'
+}
+if ($installScriptContent -notmatch 'Get-WorkflowExcludeBlockState' -or
+    $installScriptContent -notmatch 'Test-LocalPathsAreUntracked' -or
+    $installScriptContent -notmatch 'Assert-LocalPathsIgnored') {
+    $errors += 'install.ps1 must enforce the repository-local Git exclusion preflight and verification.'
 }
 
 foreach ($jsonFile in Get-ChildItem -LiteralPath $workflowRoot -Recurse -File -Filter '*.json') {

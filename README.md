@@ -15,6 +15,7 @@ The workflow turns tickets, specifications, and written requirements into eviden
 - [Repository layout](#repository-layout)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
+- [Installation modes](#installation-modes)
 - [Distribution commands](#distribution-commands)
 - [Installed project layout](#installed-project-layout)
 - [Bootstrap](#bootstrap)
@@ -49,6 +50,7 @@ It provides:
 - Deterministic, exit-code-based quality gates.
 - Read-only Azure DevOps work-item retrieval.
 - Safe installation and hash-aware updates.
+- Local-first installation that keeps the OpenCode runtime out of consumer commits and pull requests.
 - Guarded feature-branch creation, Conventional Commits, normal feature-branch pushes, and draft PR creation with one-time human approvals.
 
 This project does **not** attempt to replace project-specific conventions, CI/CD, code ownership, or human engineering judgment.
@@ -78,6 +80,10 @@ The reviewer can inspect the ticket, approved plan, diff, Git history, and gate 
 ### Delivery remains human-controlled
 
 The workflow never performs a delivery mutation automatically. A dedicated `delivery` agent can create one local feature branch, Conventional Commit, normal feature-branch push, or draft pull request only after the exact operation is proposed, repository state is revalidated, and the user gives a new one-time approval. Merge, history rewriting, release, deployment, secret handling, and cloud mutations remain manual and denied.
+
+### Consumer repositories stay clean by default
+
+The default `Local` installation writes the workflow files into the consumer working tree so OpenCode can discover them, then excludes only the exact workflow-owned paths through that clone's `.git/info/exclude`. The consumer's tracked `.gitignore`, commits, branches, and pull requests are not changed. Teams that intentionally want to version the workflow can opt into `Shared` mode.
 
 ## How the workflow fits together
 
@@ -115,7 +121,8 @@ The distribution and consumer roles are intentionally separated:
 
 - The **distribution repository** versions templates, scripts, schemas, and presets.
 - A **consumer repository** receives the contents of `template/` at its root.
-- `.ai/workflow-installation.json` records the installed version and hashes needed for later updates.
+- Local installations keep those files available on disk but invisible to normal Git status and staging in that clone.
+- `.ai/workflow-installation.json` records the installed version, installation mode, local exclusion paths, and hashes needed for later updates.
 - `.ai/project.json` is generated only after bootstrap has inspected the real consumer repository and the user has approved the proposal.
 
 ## Repository layout
@@ -188,6 +195,7 @@ ai-engineering-workflow/
 - Windows with PowerShell 7 or later.
 - Read and write access to the target repository.
 - The target must be outside the workflow distribution directory.
+- Git for the default `Local` mode. Existing targets must be initialized repositories, and the target must be the repository root.
 
 The distribution management scripts and guarded consumer delivery scripts are PowerShell-only. The remaining OpenCode payload is Markdown and JSON.
 
@@ -201,7 +209,7 @@ No model is pinned by the base template. Agents inherit the model selected in th
 
 ### Optional tools
 
-- Git, when `new-project.ps1 -InitializeGit` is used.
+- Git is optional only when explicitly using `Shared` mode without `-InitializeGit`.
 - GitHub CLI, when the approved workflow creates a draft pull request.
 - .NET SDK, for the `dotnet-webapi` preset.
 - Node.js and npm, for the `react-vite` preset and for working with Node projects.
@@ -234,7 +242,15 @@ If the dry run reports no conflicts, install the payload:
   -TargetPath "C:\Repositories\existing-application"
 ```
 
-The target directory must already exist. Existing application files that do not overlap workflow paths are left untouched.
+`Local` is the default mode. The target directory must already exist, be an initialized Git repository, and be its repository root. Existing application files that do not overlap workflow paths are left untouched. The installer does not create a branch, stage files, commit, push, or edit the repository's tracked `.gitignore`.
+
+To intentionally make all workflow files visible to Git:
+
+```powershell
+.\scripts\install.ps1 `
+  -TargetPath "C:\Repositories\existing-application" `
+  -Mode Shared
+```
 
 ### Create a new repository
 
@@ -255,16 +271,17 @@ Preview a new project without creating it:
   -DryRun
 ```
 
-Create the project and initialize a `main` Git branch:
+Create the project with a local-only workflow installation:
 
 ```powershell
 .\scripts\new-project.ps1 `
   -Name "orders-api" `
   -ParentPath "C:\Repositories" `
   -Preset "dotnet-webapi" `
-  -Architecture "vertical-slice" `
-  -InitializeGit
+  -Architecture "vertical-slice"
 ```
+
+Because `Local` is the default, `new-project.ps1` initializes a `main` Git repository when the preset did not already create one. Use `-Mode Shared` when the workflow should remain Git-visible; add `-InitializeGit` only if the shared project should also be initialized as a repository.
 
 ### Bootstrap the consumer repository
 
@@ -283,6 +300,79 @@ Inside OpenCode:
 
 Review the proposed `.ai/project.json` and `.ai/project-rules.md`. Correct any assumptions or explicitly approve the proposal. Bootstrap writes those files only after approval.
 
+## Installation modes
+
+### Local mode: default
+
+Local mode is intended for individual developers and for consumer repositories that should not carry the workflow implementation in their history.
+
+```powershell
+.\scripts\install.ps1 `
+  -TargetPath "C:\Repositories\existing-application" `
+  -Mode Local
+```
+
+The installer:
+
+- Requires the target to be the root of an initialized Git repository.
+- Rejects a local installation when any path that needs to be excluded is already tracked. Git cannot hide tracked files with ignore rules.
+- Performs the normal destination conflict preflight before copying.
+- Adds one clearly delimited block to the clone-local `.git/info/exclude` file.
+- Lists exact workflow and generated file paths instead of ignoring entire `.ai` or `.opencode` directories. Unrelated consumer files cannot be hidden accidentally.
+- Preserves every line outside the managed exclude block.
+- Records the local paths in `.ai/workflow-installation.json` so later updates can maintain the block.
+- Verifies that installed workflow files are ignored and that a pure local installation did not change the Git-visible working-tree status.
+
+`.git/info/exclude` belongs only to the current clone. It is not committed, pushed, or copied when another developer clones the application repository. Each clone that needs the workflow must run the installer independently.
+
+### Shared mode: explicit opt-in
+
+Shared mode installs the same payload but does not add local Git exclusions:
+
+```powershell
+.\scripts\install.ps1 `
+  -TargetPath "C:\Repositories\existing-application" `
+  -Mode Shared
+```
+
+The files remain visible to `git status` and may be committed deliberately. The installer still never stages or commits them. Shared mode can also be used for a non-Git target.
+
+### Hybrid project-context sharing
+
+Use this option when the workflow runtime should remain local but the approved module model and repository rules should be reviewable by the team:
+
+```powershell
+.\scripts\install.ps1 `
+  -TargetPath "C:\Repositories\existing-application" `
+  -Mode Local `
+  -ShareProjectContext
+```
+
+All runtime files remain clone-local except:
+
+- `.ai/project-rules.md`, installed initially and updated by approved bootstrap.
+- `.ai/project.json`, generated only after approved bootstrap.
+
+Those two paths remain Git-visible. The installer does not stage or commit them. `-ShareProjectContext` is invalid with `Shared` mode because all workflow paths are already visible there.
+
+### Changing mode safely
+
+`update.ps1` preserves the installed mode unless an explicit mode is supplied. It can also migrate an installation:
+
+```powershell
+# Make a previously shared, untracked installation local.
+.\scripts\update.ps1 `
+  -TargetPath "C:\Repositories\existing-application" `
+  -Mode Local
+
+# Make a local installation visible to Git.
+.\scripts\update.ps1 `
+  -TargetPath "C:\Repositories\existing-application" `
+  -Mode Shared
+```
+
+Shared-to-local migration is refused if any locally excluded path is already tracked. Local-to-shared migration removes only the delimited workflow block from `.git/info/exclude`; all unrelated exclude rules remain intact.
+
 ## Distribution commands
 
 ### `install.ps1`
@@ -292,6 +382,8 @@ Installs every file under `template/` into an existing target repository.
 | Parameter | Required | Description |
 | --- | --- | --- |
 | `-TargetPath` | Yes | Existing consumer repository directory. It must be outside the distribution repository. |
+| `-Mode` | No | `Local` by default, or explicit `Shared`. Local mode requires the target to be its Git repository root. |
+| `-ShareProjectContext` | No | With Local mode, leaves `.ai/project-rules.md` and generated `.ai/project.json` Git-visible. |
 | `-DryRun` | No | Performs path and conflict validation without copying files. |
 
 Safety behavior:
@@ -301,13 +393,15 @@ Safety behavior:
 - Treats an existing `.ai/workflow-installation.json` as a conflict.
 - Aborts before copying when any conflict exists.
 - Never overwrites an existing target file.
-- Writes `.ai/workflow-installation.json` with the workflow version and SHA-256 hash of each managed template file after a successful copy.
+- Never creates a branch, stages files, commits, pushes, or edits the tracked `.gitignore`.
+- In Local mode, rejects tracked local paths before copying and manages only its delimited `.git/info/exclude` block.
+- Writes `.ai/workflow-installation.json` with the workflow version, mode, local excluded paths, and SHA-256 hash of each managed template file after a successful copy.
 
 The conflict preflight protects existing files, but the copy is not a filesystem transaction. An unexpected I/O failure during copying can leave a partial installation; inspect the reported target and remove only the files that were copied before retrying.
 
 ### `new-project.ps1`
 
-Creates a new directory, applies a project preset, installs the workflow, records bootstrap intent, and optionally initializes Git.
+Creates a new directory, applies a project preset, installs the workflow, records bootstrap intent, and initializes Git when Local mode or `-InitializeGit` requires it.
 
 | Parameter | Required | Description |
 | --- | --- | --- |
@@ -315,7 +409,9 @@ Creates a new directory, applies a project preset, installs the workflow, record
 | `-ParentPath` | Yes, except with `-ListPresets` | Existing parent directory in which the project is created. |
 | `-Preset` | No | Project preset ID. Defaults to `empty`. |
 | `-Architecture` | No | Architecture preset ID recorded as bootstrap intent. |
-| `-InitializeGit` | No | Runs `git init -b main` after project and workflow creation. |
+| `-Mode` | No | Workflow installation mode. Defaults to `Local`. |
+| `-ShareProjectContext` | No | Keeps only approved project context Git-visible in Local mode. |
+| `-InitializeGit` | No | Initializes a `main` Git repository in Shared mode. Local mode initializes Git automatically. |
 | `-DryRun` | No | Validates the target and preset and prints external commands without creating the project. |
 | `-ListPresets` | No | Lists project, stack, and architecture presets, then exits. |
 
@@ -364,13 +460,15 @@ Updates a previously managed installation using `.ai/workflow-installation.json`
 | Managed file is unchanged and template changed | File is updated. |
 | Managed file already matches the new template | File is kept. |
 | Managed file is missing | Entire update aborts before copying. |
-| Managed file was locally modified | Entire update aborts before copying. |
+| Managed file was locally modified | Entire update aborts before copying, except mutable `.ai/project-rules.md`, which is preserved. |
 | New template path does not exist in the target | File is added. |
 | New template path exists with identical content | File is accepted and added to managed metadata. |
 | New template path exists with different content | Entire update aborts before copying. |
 | Previously managed path was retired from the template | Path is reported and left untouched. |
 
-The updater never automatically deletes retired files. Resolve reported conflicts deliberately; do not replace customized project rules blindly.
+The updater never automatically deletes retired files. In Local mode, their recorded paths remain locally excluded so a retired workflow file is not exposed accidentally by a later update. Customized `.ai/project-rules.md` is treated as user-owned project context and is preserved.
+
+`update.ps1` accepts `-Mode` and `-ShareProjectContext` using the same semantics as installation. Without those parameters, it preserves the mode recorded in schema-version-2 metadata. Schema-version-1 installations are interpreted as `Shared`, matching the behavior of workflow releases before 1.2.0.
 
 Installations created before `.ai/workflow-installation.json` was introduced cannot be updated automatically. They must be migrated or reinstalled after reviewing conflicts.
 
@@ -425,6 +523,8 @@ consumer-repository/
     └── skills/
 ```
 
+The physical layout is identical in Local and Shared modes. The difference is Git visibility: Local mode records exact paths in `.git/info/exclude`, while Shared mode leaves them visible. No workflow file is committed automatically in either mode.
+
 For an existing repository installed with `install.ps1`, `.ai/bootstrap-input.json` is normally absent. Bootstrap derives its proposal entirely from repository evidence and user corrections.
 
 ### Important files
@@ -433,7 +533,7 @@ For an existing repository installed with `install.ps1`, `.ai/bootstrap-input.js
 - `opencode.json`: default agent and permission policy.
 - `.ai/project.json`: approved modules, context skills, integrations, and deterministic quality commands.
 - `.ai/project-rules.md`: approved repository-specific architecture and engineering rules.
-- `.ai/workflow-installation.json`: distribution version and managed-file hashes used by updates.
+- `.ai/workflow-installation.json`: distribution version, installation mode, exact local exclusion paths, and managed-file hashes used by updates.
 - `.ai/bootstrap-input.json`: project-generator intent; it is not authoritative evidence.
 - `.ai/pull-request-template.md`: detailed structure required by `/pr` and `/pr-create`.
 - `.ai/pr-draft.md`: ignored local copy of the exact approved PR body.
@@ -1027,7 +1127,7 @@ When changing the payload or distribution behavior:
 3. Update schemas when a contract changes.
 4. Update this README.
 5. Run `scripts/validate.ps1`.
-6. Test a fresh install, a fresh project, a clean update, and a locally modified update conflict.
+6. Test fresh Local, Shared, and hybrid installs; a fresh project; mode migration; a clean update; and a locally modified update conflict.
 
 ## Validation and release checklist
 
@@ -1037,10 +1137,16 @@ Before releasing a change:
 - [ ] The distribution root contains no `AGENTS.md`, `opencode.json`, `.ai/`, or `.opencode/`.
 - [ ] `scripts/validate.ps1` passes.
 - [ ] `install.ps1 -DryRun` reports conflicts without writing.
-- [ ] A fresh installation creates valid installation metadata.
+- [ ] A fresh Local installation leaves the pre-existing Git-visible status unchanged.
+- [ ] Local installation preserves unrelated `.git/info/exclude` content and ignores only exact workflow-owned paths.
+- [ ] Local installation rejects paths that are already tracked.
+- [ ] A Shared installation leaves workflow files Git-visible.
+- [ ] A hybrid installation exposes only `.ai/project-rules.md` and generated `.ai/project.json` from the workflow payload.
+- [ ] A fresh installation creates schema-version-2 metadata with the correct mode and exclusion paths.
 - [ ] `new-project.ps1 -ListPresets` lists every supported preset.
 - [ ] At least one offline preset is created and its tests pass.
 - [ ] `update.ps1 -DryRun` succeeds for an unchanged installation.
+- [ ] Local-to-Shared and untracked Shared-to-Local migrations preserve unrelated Git exclude rules.
 - [ ] An update aborts when a managed file was locally modified.
 - [ ] OpenCode discovers `orchestrator`, `developer`, `reviewer`, `tester`, and `delivery` in a consumer repository.
 - [ ] The reviewer remains effectively read-only.
@@ -1077,6 +1183,22 @@ The installer does not merge or overwrite them. Review each conflict and decide 
 - Use a clean target.
 
 Run `-DryRun` again before installing.
+
+### Local installation requires a Git repository
+
+Local mode stores its ignore rules in the clone's `.git/info/exclude`, so the target must be an initialized repository and must be the repository root. Initialize the application repository first, target its root, or explicitly use `-Mode Shared` when local Git exclusion is not wanted.
+
+### Local installation reports tracked paths
+
+Git ignore rules cannot hide files that are already tracked. The installer and updater therefore refuse Local mode when a locally excluded path is present in the index. Keep `Shared` mode, or deliberately remove the relevant path from version control using your normal repository-review process before retrying. The workflow never untracks it automatically.
+
+### Workflow files appear after cloning the application elsewhere
+
+This is expected for Local mode: `.git/info/exclude` is clone-specific and is not transferred by Git. Install the workflow separately in each clone that needs OpenCode support.
+
+### Switch between Local and Shared mode
+
+Use `update.ps1 -Mode Local` or `update.ps1 -Mode Shared`. The updater modifies only the block delimited by `# BEGIN ai-engineering-workflow` and `# END ai-engineering-workflow`; malformed or duplicate blocks cause a safe failure instead of an overwrite.
 
 ### Update reports `locally modified`
 
@@ -1133,6 +1255,8 @@ The workflow reports retrieval gaps and does not fall back to a write-capable op
 - The workflow does not mark PRs ready, request reviewers, apply labels, merge, release, or deploy.
 - The workflow does not configure CI/CD or deployment automatically.
 - File installation and updates perform full conflict preflight, but are not transactional against unexpected filesystem failures.
+- Local installations are intentionally clone-specific. A new clone must install the workflow again.
+- Local mode depends on `.git/info/exclude`; it cannot hide workflow paths that are already tracked.
 - OpenCode V2 is evolving; validate the distribution again after upgrading the CLI.
 
 ## OpenCode V2 compatibility
