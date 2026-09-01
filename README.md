@@ -687,7 +687,7 @@ Resume or audit a run with:
 /run-status ticket-18427
 ```
 
-`Validate` checks the run schema and every artifact hash. Gate and review transitions also require an unchanged HEAD. Review requires the actual worktree fingerprint to match the one recorded after gates. After commit, the state script reconstructs the committed patch and refuses it unless it matches the exact gate-reviewed fingerprint.
+Every transition first validates the run schema and every canonical artifact hash. Gate and review transitions also require an unchanged HEAD. Review requires the actual worktree fingerprint to match the one recorded after gates. A temporary Git index produces the same canonical binary diff for tracked, deleted, and newly added files without modifying the real index. After commit, the state script reconstructs that representation and refuses the commit unless it matches the exact gate-reviewed fingerprint.
 
 ### Recommended lifecycle
 

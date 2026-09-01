@@ -52,27 +52,38 @@ function Resolve-InRepositoryFile([string]$RepositoryRoot, [string]$Path) {
 }
 
 function Get-WorktreeFingerprint([string]$RepositoryRoot, [string]$CurrentSha) {
-    $parts = @("HEAD=$CurrentSha")
-    if ($CurrentSha -ne 'UNBORN') {
-        $diff = @(& git -C $RepositoryRoot diff --binary HEAD --)
-        if ($LASTEXITCODE -ne 0) { throw 'Unable to calculate the tracked worktree diff.' }
-        $parts += 'DIFF'
-        $parts += ($diff -join "`n")
-    }
-    $untracked = @(& git -C $RepositoryRoot ls-files --others --exclude-standard)
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect untracked files.' }
-    foreach ($relative in @($untracked | Sort-Object)) {
-        $full = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot $relative))
-        if (-not $full.StartsWith($RepositoryRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Untracked path escapes repository: $relative"
+    $temporaryIndex = Join-Path ([IO.Path]::GetTempPath()) ('ai-engineering-workflow-index-' + [Guid]::NewGuid().ToString('N'))
+    $previousIndex = [Environment]::GetEnvironmentVariable('GIT_INDEX_FILE', 'Process')
+    $emptyTree = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+    try {
+        [Environment]::SetEnvironmentVariable('GIT_INDEX_FILE', $temporaryIndex, 'Process')
+        if ($CurrentSha -eq 'UNBORN') {
+            & git -C $RepositoryRoot read-tree --empty
         }
-        $parts += "UNTRACKED=${relative}:$(Get-FileSha256 -Path $full)"
+        else {
+            & git -C $RepositoryRoot read-tree $CurrentSha
+        }
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to initialize the temporary Git index.' }
+
+        & git -C $RepositoryRoot add -A -- .
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to construct the canonical worktree snapshot.' }
+
+        $baseline = if ($CurrentSha -eq 'UNBORN') { $emptyTree } else { $CurrentSha }
+        $diff = @(& git -C $RepositoryRoot diff --cached --binary --no-ext-diff $baseline --)
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to calculate the canonical worktree diff.' }
+        return Get-StringSha256 -Value ((@("HEAD=$CurrentSha", 'DIFF', ($diff -join "`n"))) -join "`n")
     }
-    return Get-StringSha256 -Value ($parts -join "`n")
+    finally {
+        [Environment]::SetEnvironmentVariable('GIT_INDEX_FILE', $previousIndex, 'Process')
+        if (Test-Path -LiteralPath $temporaryIndex) { Remove-Item -LiteralPath $temporaryIndex -Force }
+        $lockPath = $temporaryIndex + '.lock'
+        if (Test-Path -LiteralPath $lockPath) { Remove-Item -LiteralPath $lockPath -Force }
+    }
 }
 
 function Get-CommitFingerprint([string]$RepositoryRoot, [string]$ParentSha, [string]$CommitSha) {
-    $diff = @(& git -C $RepositoryRoot diff --binary $ParentSha $CommitSha --)
+    $baseline = if ($ParentSha -eq 'UNBORN') { '4b825dc642cb6eb9a060e54bf8d69288fbee4904' } else { $ParentSha }
+    $diff = @(& git -C $RepositoryRoot diff --binary --no-ext-diff $baseline $CommitSha --)
     if ($LASTEXITCODE -ne 0) { throw 'Unable to calculate committed diff fingerprint.' }
     return Get-StringSha256 -Value ((@("HEAD=$ParentSha", 'DIFF', ($diff -join "`n"))) -join "`n")
 }
@@ -182,6 +193,7 @@ if ($Action -eq 'Start') {
 }
 else {
     $state = Read-State -StatePath $statePath
+    Test-State -State $state -RunRoot $runRoot -SchemaPath $schemaPath
     switch ($Action) {
         'ApprovePlan' {
             Assert-Status -State $state -Allowed @('PLANNING')
@@ -238,8 +250,15 @@ else {
             $newSha = Get-CurrentSha -RepositoryRoot $repositoryRoot
             if ($newSha -eq [string]$state.currentSha -or $newSha -eq 'UNBORN') { throw 'RecordCommit requires one new commit.' }
             $parents = @(& git -C $repositoryRoot show -s --format=%P $newSha)
-            if ($LASTEXITCODE -ne 0 -or $parents.Count -ne 1 -or $parents[0].Trim() -ne [string]$state.currentSha) {
-                throw 'New commit must have the recorded run SHA as its single parent.'
+            $parentShas = @($parents | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            $validParent = if ([string]$state.currentSha -eq 'UNBORN') {
+                $parentShas.Count -eq 0
+            }
+            else {
+                $parentShas.Count -eq 1 -and $parentShas[0] -eq [string]$state.currentSha
+            }
+            if ($LASTEXITCODE -ne 0 -or -not $validParent) {
+                throw 'New commit must be the single next commit after the recorded run SHA.'
             }
             $status = @(& git -C $repositoryRoot status --porcelain=v1 --untracked-files=all)
             if ($LASTEXITCODE -ne 0 -or $status.Count -gt 0) { throw 'RecordCommit requires a clean working tree.' }

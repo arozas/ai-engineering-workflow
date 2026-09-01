@@ -47,7 +47,7 @@ try {
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-Mode', 'Local') | Out-Null
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local installation remains invisible to Git.'
     $metadata = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\workflow-installation.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($metadata.workflowVersion -eq '1.4.0') -Message 'Installed metadata records version 1.4.0.'
+    Assert-True -Condition ($metadata.workflowVersion -eq '1.4.1') -Message 'Installed metadata records version 1.4.1.'
 
     $project = [ordered]@{
         '$schema' = './project.schema.json'
@@ -83,31 +83,41 @@ try {
     $stateScript = Join-Path $repositoryRoot '.ai\scripts\workflow-state.ps1'
     $runId = 'quick-fixture-change'
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $runId, '-WorkflowPath', 'fast-path', '-TaskType', 'QuickFix', '-ArtifactPath', '.ai/runtime/requirement.md') -WorkingDirectory $repositoryRoot | Out-Null
-    Set-Content -LiteralPath (Join-Path $runtimeRoot 'plan.md') -Value 'Change src/app/app.txt and verify its content.' -Encoding utf8
+    $approvedPlan = 'Change src/app/app.txt, add src/app/new.txt, and verify both files.'
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'plan.md') -Value $approvedPlan -Encoding utf8
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $runId, '-ArtifactPath', '.ai/runtime/plan.md') -WorkingDirectory $repositoryRoot | Out-Null
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-Null
     Set-Content -LiteralPath (Join-Path $sourceRoot 'app.txt') -Value 'after' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $sourceRoot 'new.txt') -Value 'new file' -Encoding utf8
 
     $classifier = Join-Path $repositoryRoot '.ai\scripts\fast-path-check.ps1'
     $classification = Invoke-PowerShell -ScriptPath $classifier -Arguments @('-TaskType', 'QuickFix', '-Phase', 'Actual', '-BaseRef', 'HEAD', '-AcceptanceClear', '-RootCauseKnown', '-VerificationAvailable') -WorkingDirectory $repositoryRoot
     $classificationJson = ($classification -join "`n") | ConvertFrom-Json
-    Assert-True -Condition ($classificationJson.verdict -eq 'FAST_PATH_ELIGIBLE' -and $classificationJson.observed.fileCount -eq 1 -and $classificationJson.observed.moduleCount -eq 1) -Message 'Actual fast-path scope is derived from Git and module configuration.'
+    Assert-True -Condition ($classificationJson.verdict -eq 'FAST_PATH_ELIGIBLE' -and $classificationJson.observed.fileCount -eq 2 -and $classificationJson.observed.moduleCount -eq 1) -Message 'Actual fast-path scope is derived from tracked and untracked Git changes.'
 
     Set-Content -LiteralPath (Join-Path $runtimeRoot 'gates.json') -Value '{"overall":"PASS"}' -Encoding utf8
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordGates', '-RunId', $runId, '-ArtifactPath', '.ai/runtime/gates.json', '-Verdict', 'PASS') -WorkingDirectory $repositoryRoot | Out-Null
+
+    $canonicalPlanPath = Join-Path $repositoryRoot ".ai\runs\$runId\plan.md"
+    Set-Content -LiteralPath $canonicalPlanPath -Value 'unapproved replacement plan' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'review.md') -Value 'FAST REVIEW PASS' -Encoding utf8
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordReview', '-RunId', $runId, '-ArtifactPath', '.ai/runtime/review.md', '-Verdict', 'PASS') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Assert-True -Condition $true -Message 'Every state transition rejects a modified canonical artifact.'
+    Set-Content -LiteralPath $canonicalPlanPath -Value $approvedPlan -Encoding utf8
+
     Set-Content -LiteralPath (Join-Path $runtimeRoot 'review.md') -Value 'FAST REVIEW PASS' -Encoding utf8
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordReview', '-RunId', $runId, '-ArtifactPath', '.ai/runtime/review.md', '-Verdict', 'PASS') -WorkingDirectory $repositoryRoot | Out-Null
     $ready = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Validate', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
     Assert-True -Condition ($ready.status -eq 'READY_FOR_DELIVERY') -Message 'Approved plan, gates, and review reach READY_FOR_DELIVERY.'
 
-    & git -C $repositoryRoot add -- 'src/app/app.txt'
+    & git -C $repositoryRoot add -- 'src/app/app.txt' 'src/app/new.txt'
     & git -C $repositoryRoot commit -m 'test: update fixture' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Unable to create state-machine test commit.' }
     $commitSha = (& git -C $repositoryRoot rev-parse HEAD).Trim()
     Set-Content -LiteralPath (Join-Path $runtimeRoot 'commit.json') -Value ('{"sha":"' + $commitSha + '"}') -Encoding utf8
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordCommit', '-RunId', $runId, '-ArtifactPath', '.ai/runtime/commit.json') -WorkingDirectory $repositoryRoot | Out-Null
     $committed = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Show', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
-    Assert-True -Condition ($committed.status -eq 'COMMITTED' -and $committed.currentSha -eq $commitSha) -Message 'Only the exact reviewed diff can be recorded as committed.'
+    Assert-True -Condition ($committed.status -eq 'COMMITTED' -and $committed.currentSha -eq $commitSha) -Message 'The exact reviewed diff, including a new file, can be recorded as committed.'
 
     Set-Content -LiteralPath (Join-Path $repositoryRoot 'package.json') -Value '{"name":"risk"}' -Encoding utf8
     Invoke-PowerShell -ScriptPath $classifier -Arguments @('-TaskType', 'SmallTask', '-Phase', 'Actual', '-BaseRef', 'HEAD', '-AcceptanceClear', '-VerificationAvailable') -ExpectedExitCode 3 -WorkingDirectory $repositoryRoot | Out-Null
