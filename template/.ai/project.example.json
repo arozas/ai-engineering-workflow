@@ -17,6 +17,11 @@
       "linesMultiplier": 3
     }
   },
+  "diagnostics": {
+    "maxHypothesisIterations": 3,
+    "requireReproduction": false,
+    "commands": []
+  },
   "modules": [
     {
       "id": "backend",

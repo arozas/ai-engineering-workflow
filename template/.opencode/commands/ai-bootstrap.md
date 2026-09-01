@@ -15,4 +15,4 @@ For an applicable repository, inspect module boundaries, languages, frameworks, 
 
 Reuse built-in stack and architecture skills. When verified project-specific behavior is not covered, propose minimal `project-<module-id>` skills plus a complete `.ai/generated-skills.json`. Produce a complete proposed `.ai/project.json` with the profile fingerprint, proposed `.ai/project-rules.md`, the generated-skills manifest, and the full text of every proposed project skill.
 
-Do not write any proposed file yet. End by asking the user to correct or explicitly approve the complete proposal. Only after explicit approval may you persist `.ai/project-profile.json`, write the approved configuration and skills, validate them again, and report that `/ticket` and `/ai-refresh` are ready.
+Do not write any proposed file yet. End by asking the user to correct or explicitly approve the complete proposal. Only after explicit approval may you persist `.ai/project-profile.json`, write the approved configuration and skills, validate them again, and report that `/ticket`, `/diagnose`, and `/ai-refresh` are ready.

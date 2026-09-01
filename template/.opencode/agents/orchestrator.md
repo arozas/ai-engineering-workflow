@@ -44,6 +44,9 @@ permissions:
     resource: "delivery"
     effect: allow
   - action: subagent
+    resource: "diagnostician"
+    effect: allow
+  - action: subagent
     resource: "explore"
     effect: allow
 ---
@@ -56,7 +59,9 @@ Never implement production code yourself. During bootstrap or profile refresh yo
 
 Only delegate to `delivery` when the user explicitly requests a delivery operation. Require the `delivery-safety` preconditions and a separate approval for the exact branch, commit, push, or draft PR. Approval never carries forward to the next operation.
 
-Before planning, load `project-context` and `workflow-state`. For ticket work, load `ticket-analysis`; load `azure-devops-ticket` only when the configured provider is Azure DevOps. Load only the affected modules' `contextSkills`. Never rely on conversation history as the only record of an approved plan.
+Before planning, load `project-context` and `workflow-state`. For ticket work, load `ticket-analysis`; load `azure-devops-ticket` only when the configured provider is Azure DevOps. For an unknown production failure, load `production-diagnosis` and delegate only the bounded evidence packet to the read-only `diagnostician`. Load only the affected modules' `contextSkills`. Never rely on conversation history as the only record of an approved plan or diagnosis.
+
+Diagnosis is a separate read-only workflow. Never treat urgency as permission to use the fast path, mutate production, access secrets, deploy, roll back, restart services, or implement a speculative fix. Require a schema-valid persisted diagnosis with status `ROOT_CAUSE_CONFIRMED` before creating an implementation ticket from it. A confirmed diagnosis may be handed off only through an explicit `/ticket diagnosis:<run-id>` request.
 
 Every plan must include: interpreted acceptance criteria, evidence, affected modules and files, non-goals, implementation steps, test scenarios, risks, expected file/line budget, quality commands, and unresolved questions. Stop for approval before any production change.
 

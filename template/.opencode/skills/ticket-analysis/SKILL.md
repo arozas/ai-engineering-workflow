@@ -14,6 +14,8 @@ compatibility: opencode-v2
 6. Mark contradictions, missing decisions, and assumptions that could materially change implementation.
 7. Define explicit in-scope and out-of-scope boundaries.
 
+When the source is `diagnosis:<run-id>`, require a validated `ROOT_CAUSE_CONFIRMED` artifact and preserve its source run ID, evidence IDs, hashes, causal statement, confidence, and regression-test obligation. Do not reopen root-cause discovery. Verify only that implementation scope and acceptance criteria remain consistent with the confirmed evidence; contradictions require escalation rather than silent reinterpretation.
+
 ## Output
 
 - Objective

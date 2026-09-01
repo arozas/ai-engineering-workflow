@@ -155,6 +155,18 @@ elseif ($referencedProjectSkills.Count -gt 0) {
     $errors += 'Project-specific skills require the profile block and generated-skills manifest.'
 }
 
+if ($project.PSObject.Properties.Name -contains 'diagnostics') {
+    $unsafeDiagnosticCommandPattern = '(?i)(?:^|\s)(?:git\s+(?:add|commit|push|merge|rebase|reset|clean|tag|branch|switch|checkout)|gh\s+(?:pr\s+(?:create|edit|ready|merge)|release|secret|variable|workflow\s+run)|kubectl\s+(?:apply|delete|patch|scale|rollout|exec|cp)|terraform\s+(?:apply|destroy|import|taint|untaint)|az\s+deployment)(?:\s|$)'
+    foreach ($command in @($project.diagnostics.commands)) {
+        if ([string]$command -match '[\r\n]') {
+            $errors += 'diagnostics.commands contains a multiline command.'
+        }
+        if ([string]$command -match $unsafeDiagnosticCommandPattern) {
+            $errors += "diagnostics.commands contains a delivery or mutation command: $command"
+        }
+    }
+}
+
 if ($errors.Count -gt 0) {
     $errors | ForEach-Object { Write-Error $_ }
     throw "Project validation failed with $($errors.Count) error(s)."

@@ -4,11 +4,17 @@ This repository uses a stack-agnostic, human-gated engineering workflow. Treat `
 
 At the start of bootstrap, ticket analysis, implementation, review, or testing, load `project-context`. It must read `.ai/project-rules.md` and the applicable module configuration before work continues. If `.ai/project.json` does not exist yet, use `/ai-bootstrap` and do not guess the project configuration. Use `/ai-refresh` when the persisted repository profile reports structural drift; never regenerate project skills inside a delivery task.
 
+## Unknown production failures
+
+Use `/diagnose` when a production symptom is known but its cause is not. The diagnostic path is read-only, evidence-driven, persisted, and limited to three hypothesis iterations. The `diagnostician` has no edit, shell, subagent, production, secret, or delivery access. It may analyze only the exact sanitized evidence packet and repository files.
+
+Do not use urgency to route an unknown incident through `/quick-fix`. Do not implement a speculative fix, connect to production, execute a mitigation, deploy, roll back, restart, repair data, or mutate cloud resources. A schema-valid `ROOT_CAUSE_CONFIRMED` run may become implementation work only after the user explicitly runs `/ticket diagnosis:<run-id>`.
+
 ## Fast path
 
 Use `/quick-fix` for a bounded bug fix and `/small-task` for bounded documentation, local configuration, or mechanical work. Both commands must load `fast-path`, run `.ai/scripts/fast-path-check.ps1`, present one compact micro-plan, and wait for explicit approval before editing.
 
-Fast-path work is limited to one module, three files, 120 added-plus-deleted lines, deterministic verification, no prohibited risk category, and at most one correction cycle. Quick-fix diagnosis may read at most two relevant production files and two relevant test files. Any unclear root cause, scope expansion, public contract, dependency, migration, generated code, authentication, authorization, secrets, data integrity, concurrency, CI/CD, infrastructure, deployment, cloud, or cross-module impact requires `/ticket` and the standard workflow.
+Fast-path work is limited to one module, three files, 120 added-plus-deleted lines, deterministic verification, no prohibited risk category, and at most one correction cycle. Quick-fix diagnosis may read at most two relevant production files and two relevant test files. An unclear production root cause requires `/diagnose`. Scope expansion, public contract, dependency, migration, generated code, authentication, authorization, secrets, data integrity, concurrency, CI/CD, infrastructure, deployment, cloud, or cross-module impact requires `/ticket` and the standard workflow.
 
 The `quick-fix` agent may delegate only to the read-only `quick-reviewer`. A fast-path review receives only the requirement, approved micro-plan, exact diff, gate evidence, and classifier output. Fast-path completion never authorizes branch, commit, push, or pull-request operations.
 
@@ -29,7 +35,7 @@ Do not guess missing project conventions. Report uncertainty and ask for approva
 1. Understand the ticket or request before changing code.
 2. Load `project-context` and only the stack and architecture skills selected by the affected module.
 3. Explore the repository and cite evidence for the proposed impact.
-4. Start a persisted workflow run and produce an implementation and test plan.
+4. Start a persisted workflow run and produce an implementation and test plan, or a bounded diagnosis when `/diagnose` was selected.
 5. Wait for explicit human approval, then record `PLAN_APPROVED` before modifying production code.
 6. If a feature branch is needed, create it while the tree is clean and before implementation.
 7. Implement only the approved scope and record the deterministic gate evidence.

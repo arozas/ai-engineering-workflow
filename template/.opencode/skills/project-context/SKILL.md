@@ -15,7 +15,7 @@ Compose project context without flooding the session or guessing conventions.
 3. Read `.ai/project-rules.md` and any `AGENTS.md` that governs the affected paths.
 4. Determine affected modules from paths and ticket evidence. If ambiguous, state the ambiguity.
 5. For each affected module, load exactly the skill IDs in `contextSkills`. Do not load every stack and architecture skill.
-6. Extract the module path, quality commands, boundaries, applicable local rules, and fast-path limits when configured.
+6. Extract the module path, quality commands, boundaries, applicable local rules, fast-path limits, and production-diagnosis policy when configured.
 7. When `profile` is configured, compare its fingerprint with `.ai/project-profile.json`. Recommend `/ai-refresh` when validation reports drift or generated-skill inconsistency; do not regenerate context during an implementation task.
 
 ## Precedence

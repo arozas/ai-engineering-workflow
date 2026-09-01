@@ -48,7 +48,7 @@ try {
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-Mode', 'Local') | Out-Null
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local installation remains invisible to Git.'
     $metadata = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\workflow-installation.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($metadata.workflowVersion -eq '1.5.0') -Message 'Installed metadata records version 1.5.0.'
+    Assert-True -Condition ($metadata.workflowVersion -eq '1.6.0') -Message 'Installed metadata records version 1.6.0.'
 
     $profileScript = Join-Path $repositoryRoot '.ai\scripts\profile-project.ps1'
     $profileOutput = Invoke-PowerShell -ScriptPath $profileScript -Arguments @('-OutputPath', '.ai/project-profile.json') -WorkingDirectory $repositoryRoot
@@ -108,6 +108,7 @@ Applies to `src/app`.
         name = 'workflow-test-consumer'
         fastPath = [ordered]@{ enabled = $true; maximumFiles = 3; maximumLines = 120; maximumProductionFilesForDiagnosis = 2; maximumTestFilesForDiagnosis = 2; maximumCorrectionIterations = 1 }
         review = [ordered]@{ maxIterations = 2; diffBudget = [ordered]@{ filesMultiplier = 2; linesMultiplier = 3 } }
+        diagnostics = [ordered]@{ maxHypothesisIterations = 2; requireReproduction = $false; commands = @() }
         profile = [ordered]@{ repositoryFingerprint = [string]$profile.structureFingerprint; analyzedAtUtc = [DateTime]::UtcNow.ToString('o'); source = '.ai/project-profile.json'; generatedSkillsManifest = '.ai/generated-skills.json' }
         modules = @([ordered]@{
             id = 'app'
@@ -146,10 +147,99 @@ Applies to `src/app`.
     Remove-Item -LiteralPath $invalidProjectPath -Force
     Assert-True -Condition $true -Message 'A module path escaping the repository is rejected.'
 
+    $invalidDiagnosticProject = ($project | ConvertTo-Json -Depth 8 | ConvertFrom-Json -AsHashtable)
+    $invalidDiagnosticProject.diagnostics.commands = @('kubectl apply -f production.yaml')
+    $invalidDiagnosticProject | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $invalidProjectPath -Encoding utf8
+    Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\validate-project.ps1') -Arguments @('-ProjectPath', '.ai/invalid-project.json') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Remove-Item -LiteralPath $invalidProjectPath -Force
+    Assert-True -Condition $true -Message 'Known delivery and infrastructure mutations are rejected from diagnostic commands.'
+
     $runtimeRoot = Join-Path $repositoryRoot '.ai\runtime'
     New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
-    Set-Content -LiteralPath (Join-Path $runtimeRoot 'requirement.md') -Value 'Change the fixture text.' -Encoding utf8
     $stateScript = Join-Path $repositoryRoot '.ai\scripts\workflow-state.ps1'
+
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'requirement.md') -Value 'Production requests intermittently return a stale value; cause unknown.' -Encoding utf8
+    $diagnosticRunId = 'diagnose-stale-value'
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $diagnosticRunId, '-WorkflowPath', 'diagnostic', '-TaskType', 'ProductionBug', '-ArtifactPath', '.ai/runtime/requirement.md') -WorkingDirectory $repositoryRoot | Out-Null
+    $diagnosticStarted = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Show', '-RunId', $diagnosticRunId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
+    Assert-True -Condition ($diagnosticStarted.status -eq 'DIAGNOSING' -and $diagnosticStarted.maximumDiagnosticIterations -eq 2) -Message 'A diagnostic run starts read-only with the configured bounded iteration count.'
+
+    @'
+{
+  "schemaVersion": 1,
+  "runId": "diagnose-stale-value",
+  "status": "BLOCKED",
+  "summary": "The symptom is established but current evidence cannot distinguish cache and source-data hypotheses.",
+  "impact": { "severity": "HIGH", "affectedUsers": "Some production users", "firstObservedUtc": null, "affectedVersions": [] },
+  "evidence": [
+    { "id": "E1", "type": "incident-report", "source": "sanitized user report", "observation": "Responses can contain a stale value.", "sanitized": true }
+  ],
+  "hypotheses": [
+    { "id": "H1", "statement": "A cache entry may outlive its source value.", "status": "OPEN", "supportingEvidenceIds": ["E1"], "contradictingEvidenceIds": [], "falsificationTest": "Compare sanitized cache age and source update time for one affected request.", "result": null }
+  ],
+  "reproduction": { "status": "NOT_ATTEMPTED", "steps": [], "evidenceIds": [] },
+  "rootCause": null,
+  "regressionTest": null,
+  "missingEvidence": ["A sanitized trace correlating one stale response with cache and source timestamps."],
+  "mitigationOptions": [],
+  "escalationReason": null,
+  "safety": { "productionMutationPerformed": false, "secretsAccessed": false }
+}
+'@ | Set-Content -LiteralPath (Join-Path $runtimeRoot 'diagnosis.json') -Encoding utf8
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordDiagnosis', '-RunId', $diagnosticRunId, '-ArtifactPath', '.ai/runtime/diagnosis.json', '-Verdict', 'FAIL') -WorkingDirectory $repositoryRoot | Out-Null
+    $blockedDiagnosis = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Show', '-RunId', $diagnosticRunId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
+    Assert-True -Condition ($blockedDiagnosis.status -eq 'DIAGNOSIS_BLOCKED' -and $blockedDiagnosis.diagnosticIterations -eq 1) -Message 'Insufficient evidence is persisted as DIAGNOSIS_BLOCKED without claiming a cause.'
+
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginDiagnosticIteration', '-RunId', $diagnosticRunId) -WorkingDirectory $repositoryRoot | Out-Null
+    $invalidConfirmed = Get-Content -LiteralPath (Join-Path $runtimeRoot 'diagnosis.json') -Raw | ConvertFrom-Json -AsHashtable
+    $invalidConfirmed.status = 'ROOT_CAUSE_CONFIRMED'
+    $invalidConfirmed.missingEvidence = @()
+    $invalidConfirmed.hypotheses[0].status = 'CONFIRMED'
+    $invalidConfirmed.regressionTest = 'Verify an updated value is returned.'
+    $invalidConfirmed | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $runtimeRoot 'diagnosis.json') -Encoding utf8
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordDiagnosis', '-RunId', $diagnosticRunId, '-ArtifactPath', '.ai/runtime/diagnosis.json', '-Verdict', 'PASS') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Assert-True -Condition $true -Message 'A plausible hypothesis cannot be recorded as confirmed without an evidence-backed root cause.'
+
+    @'
+{
+  "schemaVersion": 1,
+  "runId": "diagnose-stale-value",
+  "status": "ROOT_CAUSE_CONFIRMED",
+  "summary": "The cached value remains valid after the source value changes.",
+  "impact": { "severity": "HIGH", "affectedUsers": "Some production users", "firstObservedUtc": null, "affectedVersions": ["fixture"] },
+  "evidence": [
+    { "id": "E1", "type": "incident-report", "source": "sanitized user report", "observation": "Responses can contain a stale value.", "sanitized": true },
+    { "id": "E2", "type": "trace", "source": "sanitized correlated trace", "observation": "The response used a cache entry created before the source update.", "sanitized": true }
+  ],
+  "hypotheses": [
+    { "id": "H1", "statement": "The cache entry outlives its source value.", "status": "CONFIRMED", "supportingEvidenceIds": ["E1", "E2"], "contradictingEvidenceIds": [], "falsificationTest": "Compare cache creation and source update time for an affected response.", "result": "E2 shows the stale cache entry was selected after the source update." }
+  ],
+  "reproduction": { "status": "NOT_REPRODUCED", "steps": [], "evidenceIds": [] },
+  "rootCause": { "statement": "Cache invalidation does not occur after the source value changes.", "confidence": "HIGH", "evidenceIds": ["E1", "E2"] },
+  "regressionTest": "Update the source value after priming the cache and verify the next response returns the updated value.",
+  "missingEvidence": [],
+  "mitigationOptions": ["Invalidate the affected cache key after a successful source update."],
+  "escalationReason": null,
+  "safety": { "productionMutationPerformed": false, "secretsAccessed": false }
+}
+'@ | Set-Content -LiteralPath (Join-Path $runtimeRoot 'diagnosis.json') -Encoding utf8
+    $project.diagnostics.requireReproduction = $true
+    $project | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\project.json') -Encoding utf8
+    Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\validate-diagnosis.ps1') -Arguments @('-Path', '.ai/runtime/diagnosis.json', '-ExpectedRunId', $diagnosticRunId) -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    $project.diagnostics.requireReproduction = $false
+    $project | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\project.json') -Encoding utf8
+    Assert-True -Condition $true -Message 'Project policy can require reproduction before root-cause confirmation.'
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordDiagnosis', '-RunId', $diagnosticRunId, '-ArtifactPath', '.ai/runtime/diagnosis.json', '-Verdict', 'PASS') -WorkingDirectory $repositoryRoot | Out-Null
+    $confirmedDiagnosis = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Validate', '-RunId', $diagnosticRunId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
+    Assert-True -Condition ($confirmedDiagnosis.status -eq 'ROOT_CAUSE_CONFIRMED' -and $confirmedDiagnosis.diagnosticIterations -eq 2) -Message 'An evidence-backed root cause reaches ROOT_CAUSE_CONFIRMED within the iteration limit.'
+
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'requirement.md') -Value 'Implement the confirmed stale-cache fix and regression test.' -Encoding utf8
+    $handoffRunId = 'ticket-stale-cache-fix'
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $handoffRunId, '-WorkflowPath', 'standard', '-TaskType', 'BugFix', '-SourceRunId', $diagnosticRunId, '-ArtifactPath', '.ai/runtime/requirement.md') -WorkingDirectory $repositoryRoot | Out-Null
+    $handoff = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Show', '-RunId', $handoffRunId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
+    Assert-True -Condition ($handoff.status -eq 'PLANNING' -and $handoff.sourceRunId -eq $diagnosticRunId) -Message 'Only a confirmed diagnosis can seed a traceable standard implementation run.'
+
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'requirement.md') -Value 'Change the fixture text.' -Encoding utf8
     $runId = 'quick-fixture-change'
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $runId, '-WorkflowPath', 'fast-path', '-TaskType', 'QuickFix', '-ArtifactPath', '.ai/runtime/requirement.md') -WorkingDirectory $repositoryRoot | Out-Null
     $approvedPlan = 'Change src/app/app.js, add src/app/new.txt, and verify both files.'

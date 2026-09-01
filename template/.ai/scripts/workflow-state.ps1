@@ -1,11 +1,12 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Start', 'ApprovePlan', 'BeginImplementation', 'RecordGates', 'RecordReview', 'BeginCorrection', 'RecordCommit', 'RecordPublish', 'RecordPullRequest', 'Escalate', 'Show', 'Validate')]
+    [ValidateSet('Start', 'ApprovePlan', 'BeginImplementation', 'RecordGates', 'RecordReview', 'BeginCorrection', 'RecordDiagnosis', 'BeginDiagnosticIteration', 'RecordCommit', 'RecordPublish', 'RecordPullRequest', 'Escalate', 'Show', 'Validate')]
     [string]$Action,
     [Parameter(Mandatory = $true)][ValidatePattern('^[a-z0-9][a-z0-9-]{2,63}$')][string]$RunId,
-    [ValidateSet('standard', 'fast-path')][string]$WorkflowPath,
+    [ValidateSet('standard', 'fast-path', 'diagnostic')][string]$WorkflowPath,
     [ValidateLength(1, 80)][string]$TaskType,
+    [ValidatePattern('^[a-z0-9][a-z0-9-]{2,63}$')][string]$SourceRunId,
     [string]$ArtifactPath,
     [ValidateSet('PASS', 'FAIL', 'ESCALATE')][string]$Verdict,
     [ValidateLength(1, 2000)][string]$Reason
@@ -157,15 +158,36 @@ if ($Action -eq 'Start') {
     }
     if (Test-Path -LiteralPath $runRoot) { throw "Workflow run already exists: $RunId" }
     $requirementSource = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
+    if (-not [string]::IsNullOrWhiteSpace($SourceRunId)) {
+        if ($WorkflowPath -ne 'standard') { throw 'SourceRunId is supported only when starting a standard implementation run.' }
+        $sourceRunRoot = Join-Path $runsRoot $SourceRunId
+        $sourceStatePath = Join-Path $sourceRunRoot 'state.json'
+        $sourceState = Read-State -StatePath $sourceStatePath
+        Test-State -State $sourceState -RunRoot $sourceRunRoot -SchemaPath $schemaPath
+        if ([string]$sourceState.workflowPath -ne 'diagnostic' -or [string]$sourceState.status -ne 'ROOT_CAUSE_CONFIRMED') {
+            throw "Source run '$SourceRunId' is not a confirmed diagnostic run."
+        }
+        $sourceDiagnosisPath = Join-Path $sourceRunRoot ([string]$sourceState.artifacts.diagnosis.path)
+        $diagnosisValidator = Join-Path $repositoryRoot '.ai\scripts\validate-diagnosis.ps1'
+        & $diagnosisValidator -Path $sourceDiagnosisPath -ExpectedRunId $SourceRunId | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Source diagnosis '$SourceRunId' failed validation." }
+    }
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
     $now = [DateTime]::UtcNow.ToString('o')
     $sha = Get-CurrentSha -RepositoryRoot $repositoryRoot
     $maximumCorrections = 1
+    $maximumDiagnosticIterations = 3
+    $projectPath = Join-Path $repositoryRoot '.ai\project.json'
+    if (Test-Path -LiteralPath $projectPath -PathType Leaf) {
+        $project = Get-Content -LiteralPath $projectPath -Raw | ConvertFrom-Json
+        if ($project.PSObject.Properties.Name -contains 'diagnostics' -and
+            $project.diagnostics.PSObject.Properties.Name -contains 'maxHypothesisIterations') {
+            $maximumDiagnosticIterations = [Math]::Min(3, [Math]::Max(1, [int]$project.diagnostics.maxHypothesisIterations))
+        }
+    }
     if ($WorkflowPath -eq 'standard') {
         $maximumCorrections = 3
-        $projectPath = Join-Path $repositoryRoot '.ai\project.json'
         if (Test-Path -LiteralPath $projectPath -PathType Leaf) {
-            $project = Get-Content -LiteralPath $projectPath -Raw | ConvertFrom-Json
             if ($project.PSObject.Properties.Name -contains 'review' -and
                 $project.review.PSObject.Properties.Name -contains 'maxIterations') {
                 $maximumCorrections = [Math]::Min(3, [Math]::Max(1, [int]$project.review.maxIterations))
@@ -177,12 +199,15 @@ if ($Action -eq 'Start') {
         runId = $RunId
         workflowPath = $WorkflowPath
         taskType = $TaskType
-        status = 'PLANNING'
+        status = if ($WorkflowPath -eq 'diagnostic') { 'DIAGNOSING' } else { 'PLANNING' }
+        sourceRunId = if ([string]::IsNullOrWhiteSpace($SourceRunId)) { $null } else { $SourceRunId }
         baseSha = $sha
         currentSha = $sha
         worktreeFingerprint = $null
         correctionIterations = 0
         maximumCorrectionIterations = $maximumCorrections
+        diagnosticIterations = 0
+        maximumDiagnosticIterations = $maximumDiagnosticIterations
         createdAtUtc = $now
         updatedAtUtc = $now
         escalationReason = $null
@@ -243,6 +268,44 @@ else {
             $state.correctionIterations = $next
             $state.status = 'IMPLEMENTING'
             $state.worktreeFingerprint = $null
+            Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath
+        }
+        'RecordDiagnosis' {
+            Assert-Status -State $state -Allowed @('DIAGNOSING')
+            Assert-Head -State $state -RepositoryRoot $repositoryRoot
+            if (@('PASS', 'FAIL', 'ESCALATE') -notcontains $Verdict) { throw 'RecordDiagnosis requires Verdict PASS, FAIL, or ESCALATE.' }
+            $next = [int]$state.diagnosticIterations + 1
+            if ($next -gt [int]$state.maximumDiagnosticIterations) { throw 'Diagnostic iteration limit reached; escalate instead of continuing.' }
+            $source = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
+            $diagnosisValidator = Join-Path $repositoryRoot '.ai\scripts\validate-diagnosis.ps1'
+            $validationOutput = @(& $diagnosisValidator -Path $source -ExpectedRunId $RunId)
+            if ($LASTEXITCODE -ne 0) { throw 'Diagnosis artifact failed deterministic validation.' }
+            $diagnosis = Get-Content -LiteralPath $source -Raw | ConvertFrom-Json
+            $expectedDiagnosisStatus = switch ($Verdict) {
+                'PASS' { 'ROOT_CAUSE_CONFIRMED' }
+                'FAIL' { 'BLOCKED' }
+                'ESCALATE' { 'ESCALATED' }
+            }
+            if ([string]$diagnosis.status -ne $expectedDiagnosisStatus) {
+                throw "Diagnosis status '$($diagnosis.status)' does not match verdict '$Verdict'."
+            }
+            Add-Artifact -State $state -Name 'diagnosis' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict $Verdict
+            $state.diagnosticIterations = $next
+            $state.status = switch ($Verdict) {
+                'PASS' { 'ROOT_CAUSE_CONFIRMED' }
+                'FAIL' { 'DIAGNOSIS_BLOCKED' }
+                'ESCALATE' { 'ESCALATED' }
+            }
+            if ($Verdict -eq 'ESCALATE') { $state.escalationReason = [string]$diagnosis.escalationReason }
+            Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath
+        }
+        'BeginDiagnosticIteration' {
+            Assert-Status -State $state -Allowed @('DIAGNOSIS_BLOCKED')
+            Assert-Head -State $state -RepositoryRoot $repositoryRoot
+            if ([int]$state.diagnosticIterations -ge [int]$state.maximumDiagnosticIterations) {
+                throw 'Diagnostic iteration limit reached; escalate instead of continuing.'
+            }
+            $state.status = 'DIAGNOSING'
             Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath
         }
         'RecordCommit' {

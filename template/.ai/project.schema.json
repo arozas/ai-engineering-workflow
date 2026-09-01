@@ -36,6 +36,20 @@
         }
       }
     },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxHypothesisIterations": { "type": "integer", "minimum": 1, "maximum": 3, "default": 3 },
+        "requireReproduction": { "type": "boolean", "default": false },
+        "commands": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "default": []
+        }
+      }
+    },
     "profile": {
       "type": "object",
       "additionalProperties": false,

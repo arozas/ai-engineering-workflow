@@ -21,6 +21,12 @@ This file is intentionally conservative until `/ai-bootstrap` has inspected the 
 - Dependencies: require explicit approval before adding or replacing one.
 - Security and secrets: never expose, read, or modify secrets.
 
+## Production incidents
+
+- Unknown causes use `/diagnose`; urgency does not authorize `/quick-fix` or a speculative implementation.
+- Supply only sanitized incident evidence. Production access, mitigation, rollback, restart, deployment, data repair, and cloud mutation remain outside diagnosis.
+- A fix may be planned only from a validated `ROOT_CAUSE_CONFIRMED` run or from a separate requirement whose cause is already established by the user.
+
 ## Definition of done
 
 The work is done only when acceptance criteria are mapped to evidence, configured quality commands pass, review has no BLOCKER or HIGH findings, changes remain within approved scope, and the user has received a clear explanation of residual risks.

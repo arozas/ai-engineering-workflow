@@ -6,7 +6,7 @@ compatibility: opencode-v2
 
 # Persisted workflow state
 
-Every `/ticket`, `/quick-fix`, and `/small-task` execution must use one local run under `.ai/runs/<run-id>/`. Run artifacts are ignored by Git and are not delivery content.
+Every `/ticket`, `/diagnose`, `/quick-fix`, and `/small-task` execution must use one local run under `.ai/runs/<run-id>/`. Run artifacts are ignored by Git and are not delivery content.
 
 ## Run selection
 
@@ -26,6 +26,20 @@ Use only `.ai/scripts/workflow-state.ps1`:
 8. After an approved commit, write its evidence to `.ai/runtime/commit.json` and call `RecordCommit`; the script proves that the commit is the exact gate-reviewed diff.
 9. Record an approved push and draft PR with `RecordPublish` and `RecordPullRequest` respectively.
 10. Use `Escalate` when scope, evidence, or correction limits invalidate the current route.
+
+## Diagnostic transitions
+
+Unknown production failures use a separate `diagnostic` path:
+
+1. Persist the sanitized incident report and call `Start`; the initial status is `DIAGNOSING`.
+2. Validate `.ai/runtime/diagnosis.json`, then call `RecordDiagnosis` with `PASS`, `FAIL`, or `ESCALATE`.
+3. `PASS` requires a validated `ROOT_CAUSE_CONFIRMED` artifact and enters `ROOT_CAUSE_CONFIRMED`.
+4. `FAIL` requires a validated `BLOCKED` artifact and enters `DIAGNOSIS_BLOCKED`.
+5. After new evidence and explicit human approval, call `BeginDiagnosticIteration` before another analysis. Each recorded diagnosis consumes one of the persisted one-to-three iterations.
+6. `ESCALATE` requires a validated `ESCALATED` artifact and enters `ESCALATED`.
+7. Only `/ticket diagnosis:<run-id>` may start a standard implementation run from `ROOT_CAUSE_CONFIRMED`; `Start -SourceRunId` validates and records that provenance.
+
+Diagnostic transitions never authorize edits, implementation, production access, mitigations, or delivery.
 
 Run `Validate` before resuming or delivery. Artifact hashes, HEAD, the post-gate worktree fingerprint, and legal transitions are deterministic boundaries. Never edit `state.json` or canonical run artifacts directly. A state transition records evidence; it never replaces the user's required approval.
 

@@ -37,11 +37,13 @@ foreach ($required in @(
     'template\.ai\bootstrap-input.schema.json',
     'template\.ai\workflow-installation.schema.json',
     'template\.ai\workflow-run.schema.json',
+    'template\.ai\diagnosis.schema.json',
     'template\.ai\pull-request-template.md',
     'template\.ai\scripts\fast-path-check.ps1',
     'template\.ai\scripts\profile-project.ps1',
     'template\.ai\scripts\validate-project.ps1',
     'template\.ai\scripts\workflow-state.ps1',
+    'template\.ai\scripts\validate-diagnosis.ps1',
     'template\.ai\scripts\validate-commit-message.ps1',
     'template\.ai\scripts\commit-approved.ps1',
     'template\.ai\scripts\publish-approved.ps1',
@@ -50,16 +52,19 @@ foreach ($required in @(
     'template\.opencode\agents\quick-fix.md',
     'template\.opencode\agents\quick-reviewer.md',
     'template\.opencode\agents\delivery.md',
+    'template\.opencode\agents\diagnostician.md',
     'template\.opencode\commands\ai-bootstrap.md',
     'template\.opencode\commands\quick-fix.md',
     'template\.opencode\commands\small-task.md',
     'template\.opencode\commands\ai-refresh.md',
     'template\.opencode\commands\run-status.md',
+    'template\.opencode\commands\diagnose.md',
     'template\.opencode\commands\commit.md',
     'template\.opencode\commands\pr-create.md',
     'template\.opencode\skills\repo-bootstrap\SKILL.md',
     'template\.opencode\skills\fast-path\SKILL.md',
     'template\.opencode\skills\workflow-state\SKILL.md',
+    'template\.opencode\skills\production-diagnosis\SKILL.md',
     'template\.opencode\skills\project-profiler\SKILL.md',
     'template\.opencode\skills\project-skill-builder\SKILL.md',
     '.github\pull_request_template.md'
@@ -81,6 +86,10 @@ if (Test-Path -LiteralPath $projectSchemaPath -PathType Leaf) {
         $fastPathSchema.properties.maximumLines.maximum -ne 120 -or
         $fastPathSchema.properties.maximumCorrectionIterations.const -ne 1) {
         $errors += 'Fast-path schema limits must remain bounded to 3 files, 120 lines, and one correction.'
+    }
+    $diagnosticsSchema = $projectSchema.properties.diagnostics
+    if ($null -eq $diagnosticsSchema -or $diagnosticsSchema.properties.maxHypothesisIterations.maximum -ne 3) {
+        $errors += 'Project schema must bound production diagnosis to at most three hypothesis iterations.'
     }
     $projectExamplePath = Join-Path $workflowRoot 'template\.ai\project.example.json'
     if (Test-Path -LiteralPath $projectExamplePath -PathType Leaf) {
@@ -106,7 +115,7 @@ $openCodeConfigContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'temp
 if ($openCodeConfigContent -notmatch [regex]::Escape('pwsh -NoProfile -File .ai/scripts/fast-path-check.ps1 *')) {
     $errors += 'opencode.json must allow the deterministic fast-path classifier.'
 }
-foreach ($managedScript in @('validate-project.ps1', 'workflow-state.ps1', 'profile-project.ps1')) {
+foreach ($managedScript in @('validate-project.ps1', 'workflow-state.ps1', 'profile-project.ps1', 'validate-diagnosis.ps1')) {
     if ($openCodeConfigContent -notmatch [regex]::Escape("pwsh -NoProfile -File .ai/scripts/$managedScript *")) {
         $errors += "opencode.json must allow managed script $managedScript."
     }
@@ -125,9 +134,11 @@ if ($quickReviewerAgentContent -notmatch '(?m)^steps:\s*8\s*$') {
     $errors += 'quick-reviewer agent must keep its bounded 8-step budget.'
 }
 $reviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\reviewer.md') -Raw
+$diagnosticianAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\diagnostician.md') -Raw
 foreach ($reviewDefinition in @{
     'reviewer' = $reviewerAgentContent
     'quick-reviewer' = $quickReviewerAgentContent
+    'diagnostician' = $diagnosticianAgentContent
 }.GetEnumerator()) {
     if ($reviewDefinition.Value -notmatch '(?ms)- action:\s*shell\s+resource:\s*"\*"\s+effect:\s*deny') {
         $errors += "$($reviewDefinition.Key) must deny all shell commands."
@@ -136,11 +147,19 @@ foreach ($reviewDefinition in @{
         $errors += "$($reviewDefinition.Key) must not reopen shell permissions after the deny rule."
     }
 }
+if ($diagnosticianAgentContent -notmatch '(?ms)- action:\s*edit\s+resource:\s*"\*"\s+effect:\s*deny' -or
+    $diagnosticianAgentContent -notmatch '(?ms)- action:\s*subagent\s+resource:\s*"\*"\s+effect:\s*deny') {
+    $errors += 'diagnostician must deny all edit and subagent access.'
+}
 foreach ($commandName in @('quick-fix', 'small-task')) {
     $commandContent = Get-Content -LiteralPath (Join-Path $workflowRoot "template\.opencode\commands\$commandName.md") -Raw
     if ($commandContent -notmatch '(?m)^agent:\s*quick-fix\s*$') {
         $errors += "$commandName command must run through the quick-fix agent."
     }
+}
+$diagnoseCommandContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\commands\diagnose.md') -Raw
+if ($diagnoseCommandContent -notmatch '(?m)^agent:\s*orchestrator\s*$') {
+    $errors += 'diagnose command must run through the orchestrator.'
 }
 
 $installationSchemaPath = Join-Path $workflowRoot 'template\.ai\workflow-installation.schema.json'

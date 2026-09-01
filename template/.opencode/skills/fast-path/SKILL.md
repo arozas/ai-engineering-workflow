@@ -51,7 +51,7 @@ Before proposing an edit:
 4. Estimate exact files and added-plus-deleted lines.
 5. Evaluate every risk flag explicitly.
 6. Run `.ai/scripts/fast-path-check.ps1` with `-Phase Estimate`, configured maximums, and truthful arguments derived from the evidence.
-7. If it returns `ESCALATE_STANDARD` or cannot run, stop without editing and direct the user to `/ticket`.
+7. If the production root cause remains unknown, stop without editing and direct the user to `/diagnose`. If the evaluator returns `ESCALATE_STANDARD` for another reason or cannot run, direct the user to `/ticket`.
 
 Estimate classification is deterministic for declared evidence. Semantic risks still require honest judgment, so cite evidence for every false flag.
 

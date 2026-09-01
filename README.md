@@ -2,7 +2,7 @@
 
 A reusable, stack-agnostic engineering workflow for OpenCode V2. Use this repository as a versioned distribution: install the workflow into an existing application repository, or create a new project from a preset and install the workflow automatically.
 
-The workflow turns tickets, specifications, and written requirements into evidence-based implementation plans, enforces explicit human approval before production changes, delegates implementation and testing to specialized agents, runs deterministic quality gates, performs an independent read-only review, and prepares human-facing explanations and pull-request descriptions.
+The workflow turns tickets, specifications, written requirements, and unknown production incidents into evidence-based plans or diagnoses. It enforces explicit human approval before production changes, delegates implementation and testing to specialized agents, runs deterministic quality gates, performs independent read-only review, and prepares human-facing explanations and pull-request descriptions.
 
 > [!IMPORTANT]
 > This repository is the **distribution source**, not an application repository. Do not run `/ai-bootstrap` here. The consumer payload lives under [`template/`](template/) and becomes active only after it is installed into another repository.
@@ -20,6 +20,7 @@ The workflow turns tickets, specifications, and written requirements into eviden
 - [Installed project layout](#installed-project-layout)
 - [Bootstrap](#bootstrap)
 - [Working with tickets and specifications](#working-with-tickets-and-specifications)
+- [Production diagnosis for unknown incidents](#production-diagnosis-for-unknown-incidents)
 - [Persisted workflow state](#persisted-workflow-state)
 - [Fast path for small changes](#fast-path-for-small-changes)
 - [Agents](#agents)
@@ -48,8 +49,9 @@ It provides:
 - Extensible project generators for new repositories.
 - Evidence-based detection of modules, languages, frameworks, architecture, tests, build systems, CI/CD, and repository conventions.
 - Ticket and specification analysis with testable acceptance criteria.
+- Bounded, read-only production diagnosis with persisted evidence, falsifiable hypotheses, and a confirmed-root-cause gate.
 - A mandatory human approval point before production code changes.
-- Specialized orchestrator, developer, reviewer, tester, delivery, quick-fix, and quick-reviewer agents.
+- Specialized orchestrator, diagnostician, developer, reviewer, tester, delivery, quick-fix, and quick-reviewer agents.
 - A deterministic, bounded fast path for low-risk bug fixes and small tasks.
 - Local, hash-verified run state that survives session changes and compaction.
 - Stack and architecture guidance loaded only when relevant.
@@ -67,6 +69,8 @@ This project does **not** attempt to replace project-specific conventions, CI/CD
 
 Repository files, build manifests, test projects, lockfiles, CI/CD definitions, and existing instructions are treated as stronger evidence than directory names or common industry patterns. Missing evidence remains an explicit unknown.
 
+For production incidents, plausible code is not proof. Every causal claim must cite sanitized evidence, distinguish credible alternatives, and define what would falsify it. Insufficient evidence produces `DIAGNOSIS_BLOCKED`, not a speculative fix.
+
 ### Human approval before implementation
 
 Bootstrap and ticket analysis are read-only. The orchestrator must present a complete proposal or implementation plan and wait for explicit approval before configuration or production code is changed.
@@ -82,6 +86,8 @@ The workflow does not load every stack and architecture skill into every session
 ### Workflow effort is proportional to risk
 
 Small, well-understood changes can use a bounded fast path with less context, one implementation agent, one read-only review, and at most one correction. Ambiguous, broad, cross-module, security-sensitive, contract-changing, migration, infrastructure, concurrency, data-integrity, dependency, or generated-code work must use the standard workflow.
+
+An unknown production cause uses `/diagnose`, regardless of urgency or apparent diff size. Only a confirmed diagnostic run can seed a standard implementation ticket.
 
 ### Quality results are factual
 
@@ -149,6 +155,7 @@ The distribution and consumer roles are intentionally separated:
 - `.ai/project-profile.json` records deterministic structural evidence and a refresh fingerprint without sending repository content to the installer.
 - Built-in stack and architecture skills are composed with minimal `project-<module>` skills only when repository-specific rules justify them.
 - `.ai/runs/<run-id>/state.json` provides a resumable state machine whose canonical artifacts are hash verified and remain local.
+- `/diagnose` creates a separate read-only diagnostic run. A validated `ROOT_CAUSE_CONFIRMED` result can enter the normal planning path only through an explicit `/ticket diagnosis:<run-id>` handoff.
 
 ## Repository layout
 
@@ -555,6 +562,7 @@ consumer-repository/
 │   ├── bootstrap-input.schema.json
 │   ├── workflow-installation.schema.json
 │   ├── workflow-run.schema.json           # persisted run-state contract
+│   ├── diagnosis.schema.json              # production-diagnosis evidence contract
 │   ├── workflow-installation.json       # generated by installation
 │   ├── bootstrap-input.json              # generated for new projects
 │   ├── project-profile.json              # generated after approved profiling
@@ -588,9 +596,11 @@ For an existing repository installed with `install.ps1`, `.ai/bootstrap-input.js
 - `.ai/pr-draft.md`: ignored local copy of the exact approved PR body.
 - `.ai/runtime/`: ignored temporary inputs written before deterministic state transitions.
 - `.ai/runs/<run-id>/`: canonical requirement, approved plan, gate, review, delivery evidence, hashes, SHAs, and status.
+- `.ai/diagnosis.schema.json`: portable contract for sanitized evidence, hypotheses, reproduction, root cause, regression test, and safety assertions.
 - `.ai/scripts/validate-project.ps1`: deterministic JSON Schema, module-path, context-skill, and command validation.
 - `.ai/scripts/profile-project.ps1`: bounded Git-aware repository profiling with no application writes unless an approved output path is supplied.
 - `.ai/scripts/workflow-state.ps1`: legal run transitions, artifact hashing, HEAD checks, correction limits, and worktree fingerprints.
+- `.ai/scripts/validate-diagnosis.ps1`: deterministic schema and semantic validation for evidence IDs, root-cause confirmation, blocked evidence, reproduction policy, and safety assertions.
 - `.ai/scripts/`: deterministic classifiers plus guarded delivery checks and approved Git/GitHub mutations.
 - `.opencode/agents/`: specialized agent definitions.
 - `.opencode/commands/`: slash-command prompt templates.
@@ -645,7 +655,7 @@ The proposal includes:
 - Proposed `.ai/project-rules.md` updates.
 - A summary of the exploration ledger.
 
-No configuration or skill is written during the proposal. After explicit approval, bootstrap reruns the profiler, refuses structural drift, persists `.ai/project-profile.json`, and writes only the approved `.ai/project.json`, `.ai/project-rules.md`, `.ai/generated-skills.json`, and project skills. It reports that `/ticket` is ready only after `.ai/scripts/validate-project.ps1` returns `PROJECT_VALID`.
+No configuration or skill is written during the proposal. After explicit approval, bootstrap reruns the profiler, refuses structural drift, persists `.ai/project-profile.json`, and writes only the approved `.ai/project.json`, `.ai/project-rules.md`, `.ai/generated-skills.json`, and project skills. It reports that `/ticket`, `/diagnose`, and `/ai-refresh` are ready only after `.ai/scripts/validate-project.ps1` returns `PROJECT_VALID`.
 
 ### Generated project skills
 
@@ -684,9 +694,47 @@ Examples:
 /ticket 18427
 ```
 
+## Production diagnosis for unknown incidents
+
+Use `/diagnose` when a production symptom is known but its cause is not. This is not the fast path and it does not implement a fix. It creates a separate, read-only run that turns sanitized incident evidence into bounded hypotheses and one of three auditable outcomes.
+
+```text
+/diagnose Checkout requests started returning stale totals after release 2026.09.01; the cause is unknown
+```
+
+The orchestrator loads `production-diagnosis`, persists a sanitized incident requirement, and starts a `diagnostic` run in `DIAGNOSING`. It may inspect repository evidence and may run only the local commands explicitly listed in `diagnostics.commands`, subject to the normal shell approval. The workflow never connects to production itself. Logs, metrics, traces, deployment facts, timestamps, and affected versions must be supplied by the user in a sanitized form.
+
+The orchestrator gives the `diagnostician` an exact evidence packet. That agent cannot edit files, execute shell commands, delegate work, access external directories, read secrets, or perform delivery operations. It assigns stable `E<n>` evidence IDs and `H<n>` hypothesis IDs, records supporting and contradicting evidence, and defines a safe falsification test for each hypothesis.
+
+### Diagnostic outcomes
+
+| Persisted status | Meaning | Next action |
+| --- | --- | --- |
+| `DIAGNOSIS_BLOCKED` | Current evidence cannot distinguish credible causes. The artifact names the smallest missing evidence needed. | Supply or approve new sanitized evidence, then explicitly start another bounded iteration. |
+| `ROOT_CAUSE_CONFIRMED` | Exactly one hypothesis is supported by concrete evidence, credible alternatives are addressed, and a regression-test obligation is defined. | Run `/ticket diagnosis:<run-id>` to create a separate standard implementation run. |
+| `ESCALATED` | Safe analysis cannot continue because of risk, inaccessible evidence, or the iteration limit. | Use the relevant human incident, security, data, or infrastructure process. |
+
+Each `RecordDiagnosis` call consumes one configured hypothesis iteration. A blocked run can return to `DIAGNOSING` only through `BeginDiagnosticIteration`, after the user provides or approves new evidence. The project policy allows one to three total iterations; three is the hard schema ceiling.
+
+Reproduction is preferred, not automatically mandatory. Independent logs, traces, metrics, or deployment evidence can establish a causal chain when local reproduction is impossible. Set `diagnostics.requireReproduction` to `true` when repository policy requires `REPRODUCED` or `PARTIAL` before confirmation. The deterministic validator enforces that choice.
+
+### Confirmation and handoff
+
+`.ai/scripts/validate-diagnosis.ps1` rejects duplicate IDs, dangling evidence references, multiple confirmed hypotheses, a root cause without supporting evidence, a confirmation without a regression test, a blocked result without missing evidence, and any artifact claiming that production was mutated or secrets were accessed. `workflow-state.ps1` validates and hashes the artifact again before advancing the run.
+
+After confirmation, use the exact source run ID:
+
+```text
+/ticket diagnosis:diagnose-stale-totals
+```
+
+The new standard run records `sourceRunId`, revalidates the canonical diagnosis and hashes, preserves the causal statement and regression-test obligation, verifies the proposed code scope, and creates an implementation plan. It does not repeat causal discovery and still waits for explicit plan approval before code changes.
+
+Mitigation options in a diagnosis are proposals only. `/diagnose` never authorizes a speculative code change, rollback, restart, deployment, data repair, infrastructure action, secret access, or cloud mutation. Urgency does not weaken this boundary.
+
 ## Persisted workflow state
 
-Ticket and fast-path commands create an ignored local run under `.ai/runs/<run-id>/`. This is the execution source of truth; the conversation remains the human interface but is not the only record of approval.
+Ticket, diagnostic, and fast-path commands create an ignored local run under `.ai/runs/<run-id>/`. This is the execution source of truth; the conversation remains the human interface but is not the only record of approval.
 
 ```text
 .ai/runs/ticket-18427/
@@ -711,6 +759,16 @@ PLANNING -> PLAN_APPROVED -> IMPLEMENTING
 ```
 
 Gate or review failure can enter one approved correction and return to `IMPLEMENTING` until the configured limit is reached. Any invalidated route enters `ESCALATED`. The fast path allows exactly one correction; the standard path uses `review.maxIterations`, capped at three.
+
+Legal diagnostic transitions are:
+
+```text
+DIAGNOSING -> DIAGNOSIS_BLOCKED -> DIAGNOSING
+           -> ROOT_CAUSE_CONFIRMED
+           -> ESCALATED
+```
+
+`ROOT_CAUSE_CONFIRMED` is terminal for the diagnostic run. An explicit `/ticket diagnosis:<run-id>` starts a separate `PLANNING` run whose `sourceRunId` preserves the relationship.
 
 Resume or audit a run with:
 
@@ -743,6 +801,7 @@ Every transition first validates the run schema and every canonical artifact has
 | `/ai-bootstrap` | Inspect the repository and propose project configuration. Writes approved `.ai` configuration only after consent. | No |
 | `/ai-refresh` | Compare current structural evidence with the approved profile and propose project-context or generated-skill updates. | No application code |
 | `/ticket` | Analyze a ticket, specification, or requirement and produce an approvable plan. | No |
+| `/diagnose` | Diagnose an unknown production failure from sanitized evidence, without code or production mutations. | No |
 | `/quick-fix` | Classify and implement a well-understood, low-risk bug fix through the bounded fast path. | Yes, after micro-plan approval |
 | `/small-task` | Classify and implement a narrow documentation, test, or local configuration change through the bounded fast path. | Yes, after micro-plan approval |
 | `/run-status` | Validate and display a persisted run, hashes, corrections, and next legal action. | No |
@@ -818,6 +877,7 @@ Do not force a task to remain small. Use `/ticket` and the standard lifecycle wh
 | Agent | Mode | Responsibility | Important boundary |
 | --- | --- | --- | --- |
 | `orchestrator` | Primary | Loads project context, analyzes requirements, plans work, enforces approval, and coordinates other agents. | Cannot implement production code directly. During bootstrap or refresh it may write only the explicitly approved profile, project configuration, rules, generated-skills manifest, and `project-*` skills. |
+| `diagnostician` | Subagent | Tests bounded causal hypotheses against an exact sanitized evidence packet and returns a schema-valid diagnosis. | No edits, no shell, no subagents, no production access, no secrets, and no implementation or mitigation authority. |
 | `quick-fix` | Primary | Classifies, plans, implements, verifies, and closes bounded low-risk changes with minimal context. | Must reclassify the actual diff, permits one correction only, and delegates solely to `quick-reviewer`. |
 | `quick-reviewer` | Subagent | Performs a focused independent review of a supplied fast-path diff packet. | No edits, no shell, eight-step budget, and no subagents. |
 | `developer` | Subagent | Implements the explicitly approved plan using the smallest correct diff and project conventions. | Stops with `PLAN INVALIDATED` when evidence contradicts the plan; cannot launch subagents. |
@@ -825,7 +885,7 @@ Do not force a task to remain small. Use `/ticket` and the standard lifecycle wh
 | `tester` | Subagent | Converts acceptance criteria into scenarios and adds the smallest valuable tests. | May edit recognized test paths only; never production code. Returns `TESTABILITY ISSUE` when production changes are required. |
 | `delivery` | Subagent | Revalidates delivery state and performs one approved branch, commit, push, or draft PR operation through managed scripts. | Cannot edit files or use arbitrary shell; merge, force, protected branches, tags, releases, deployments, and secret/cloud mutations remain denied. |
 
-The standard orchestrator can delegate only to `developer`, `reviewer`, `tester`, `delivery`, and OpenCode's read-only `explore` agent. Fast-path commands select the `quick-fix` primary agent directly, avoiding an orchestrator handoff; that agent can delegate only to `quick-reviewer`.
+The standard orchestrator can delegate only to `diagnostician`, `developer`, `reviewer`, `tester`, `delivery`, and OpenCode's read-only `explore` agent. Fast-path commands select the `quick-fix` primary agent directly, avoiding an orchestrator handoff; that agent can delegate only to `quick-reviewer`.
 
 Profiling does not introduce another agent. The orchestrator composes the deterministic `project-profiler` and `project-skill-builder` skills during the one-time, human-approved bootstrap. This avoids a permanent extra handoff and token cost; a dedicated read-only profiling agent can be added later if measured monorepo context pressure justifies it.
 
@@ -863,6 +923,7 @@ Official references:
 | Agent | Recommended model class | Why this class is appropriate |
 | --- | --- | --- |
 | `orchestrator` | Frontier reasoning and tool-use model | The orchestrator interprets incomplete requirements, resolves repository evidence, produces bounded plans, coordinates specialized agents, and decides when human approval is required. Strong reasoning and reliable tool use matter more than low per-call cost. |
+| `diagnostician` | Strong analytical and causal-reasoning model | The diagnostician must separate observations from inference, compare competing explanations, design falsification tests, and resist premature confirmation. Analytical discipline matters more than code generation or tool use because the role is shell-free and read-only. |
 | `developer` | Frontier coding model | The developer must understand an approved plan, navigate an existing codebase, preserve architecture and conventions, implement the smallest correct change, and diagnose quality-gate failures. Strong code generation and repository-scale context handling reduce rework. |
 | `quick-fix` | Fast, strong, cost-efficient coding model | This role handles only preclassified, single-module changes with a small context and diff budget. It still needs reliable diagnosis and editing, but a low-latency coding model usually provides a better cost/quality balance than the standard orchestrator/developer pair. |
 | `quick-reviewer` | Cost-efficient analytical model | The quick reviewer receives a compact evidence packet and a small diff. It needs disciplined defect detection and severity calibration, but not broad repository exploration or code generation. |
@@ -904,7 +965,7 @@ permissions:
 ---
 ```
 
-Use the same `model` field in `quick-fix.md`, `quick-reviewer.md`, `reviewer.md`, `tester.md`, or `delivery.md` when those agents need explicit overrides. Model selection does not change permissions, step limits, approval requirements, read-only boundaries, classifier limits, or delivery safeguards.
+Use the same `model` field in `diagnostician.md`, `quick-fix.md`, `quick-reviewer.md`, `reviewer.md`, `tester.md`, or `delivery.md` when those agents need explicit overrides. Model selection does not change permissions, step limits, approval requirements, read-only boundaries, classifier limits, diagnostic confirmation rules, or delivery safeguards.
 
 ### Distribution default versus consumer customization
 
@@ -928,6 +989,7 @@ Skills are discovered from `.opencode/skills/` and loaded on demand.
 - `project-skill-builder`: minimal evidence-backed composition of built-in and project-specific skills.
 - `project-context`: validates `.ai/project.json`, reads project rules, resolves affected modules, and loads only their context skills.
 - `ticket-analysis`: converts requirements into traceable, testable acceptance criteria.
+- `production-diagnosis`: defines sanitized evidence, bounded hypotheses, falsification, confirmation, blocked outcomes, and implementation handoff.
 - `implementation-plan`: produces the required human-approvable plan.
 - `workflow-state`: persists approved artifacts and enforces legal resumable transitions across sessions.
 - `fast-path`: classifies low-risk work, enforces minimal context and diff budgets, and defines the one-correction escalation policy.
@@ -983,6 +1045,11 @@ A simplified example:
     "maximumProductionFilesForDiagnosis": 2,
     "maximumTestFilesForDiagnosis": 2,
     "maximumCorrectionIterations": 1
+  },
+  "diagnostics": {
+    "maxHypothesisIterations": 3,
+    "requireReproduction": false,
+    "commands": []
   },
   "profile": {
     "repositoryFingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -1071,6 +1138,18 @@ The developer stops and reports scope expansion when actual changed files exceed
 | `maximumCorrectionIterations` | Exactly 1 | The single correction allowed before standard-workflow escalation. |
 
 These numeric settings only tighten scope. Risk exclusions are fixed by the fast-path skill and classifier and cannot be enabled through project configuration.
+
+### Production-diagnosis policy
+
+`diagnostics` is optional. It controls the separate read-only workflow for incidents with an unknown cause; it does not loosen agent permissions or allow production access.
+
+| Field | Allowed value | Meaning |
+| --- | --- | --- |
+| `maxHypothesisIterations` | 1 through 3 | Maximum number of persisted diagnostic conclusions, including blocked outcomes and the final result. |
+| `requireReproduction` | Boolean | When true, confirmation requires reproduction status `REPRODUCED` or `PARTIAL`; otherwise independent causal evidence may be sufficient. |
+| `commands` | Array of single-line commands | Optional local inspection or reproduction commands. Every execution still uses normal shell approval and must remain local and non-mutating. |
+
+Do not place production connection commands, secret retrieval, delivery operations, Git mutations, deployment tools, rollback commands, restarts, data repair, or infrastructure mutations in `diagnostics.commands`. Project validation rejects multiline commands and known Git, GitHub, Kubernetes, Terraform, and Azure deployment mutations. This static check is defense in depth, not proof that an arbitrary command is safe; the orchestrator must still explain the exact command and obtain approval.
 
 ## Deterministic quality gates
 
@@ -1294,13 +1373,14 @@ The installed `opencode.json`:
 - Denies direct invocation of managed mutation scripts for every agent except `delivery`.
 - Denies common infrastructure mutations such as Terraform apply/destroy, Kubernetes apply/delete, and Azure deployments.
 
-Agent-specific permissions further restrict the orchestrator, reviewer, tester, and delivery agent. Both review agents deny every shell command and receive an immutable evidence packet rather than rediscovering the repository. The delivery agent's later, narrow `ask` rules override only the exact managed operations and still require a permission decision.
+Agent-specific permissions further restrict the orchestrator, diagnostician, reviewer, tester, and delivery agent. The diagnostician and both review agents deny every shell command and receive an immutable evidence packet rather than rediscovering or mutating the repository. The diagnostician additionally denies every edit and subagent action. The delivery agent's later, narrow `ask` rules override only the exact managed operations and still require a permission decision.
 
 ### Human gates
 
 Explicit approval is required before:
 
 - Writing bootstrap configuration.
+- Starting another diagnostic iteration after `DIAGNOSIS_BLOCKED` with newly supplied evidence.
 - Modifying production code.
 - Adding dependencies.
 - Changing public contracts.
@@ -1318,6 +1398,8 @@ Each delivery approval is single-purpose and state-bound. Commit, push, and draf
 Plans must identify affected modules and files, non-goals, test scenarios, risks, exact quality commands, and an expected file/line budget. If repository evidence later invalidates the plan, the developer must stop with `PLAN INVALIDATED` rather than inventing a new design.
 
 `/ai-bootstrap` and installation/update tooling validate `.ai/project.json` against its JSON schema before accepting it. The validator also rejects duplicate module identifiers, missing referenced skills, multiline quality commands, absolute module paths, and paths that escape the repository. Profiled configurations additionally require matching profile and generated-skill fingerprints, valid evidence paths, correct module ownership, and structurally current repository evidence.
+
+Production diagnoses have an additional deterministic boundary. The schema and validator require sanitized evidence records, internally consistent references, exactly one supported root cause for confirmation, a regression-test obligation, explicit missing evidence for blocked results, and false safety flags for production mutation and secret access. Canonical diagnosis artifacts are copied, hashed, and revalidated on every state transition and implementation handoff.
 
 ## Extending the distribution
 
@@ -1462,6 +1544,7 @@ Before releasing a change:
 - [ ] Local-to-Shared and untracked Shared-to-Local migrations preserve unrelated Git exclude rules.
 - [ ] An update aborts when a managed file was locally modified.
 - [ ] OpenCode discovers `orchestrator`, `developer`, `reviewer`, `tester`, and `delivery` in a consumer repository.
+- [ ] OpenCode discovers `diagnostician`, `/diagnose`, and `production-diagnosis`.
 - [ ] OpenCode discovers `quick-fix`, `quick-reviewer`, `/quick-fix`, and `/small-task` in a consumer repository.
 - [ ] OpenCode discovers `/ai-refresh`, `project-profiler`, and `project-skill-builder`.
 - [ ] Deterministic profiling emits a schema-valid stable fingerprint and excludes workflow-owned paths.
@@ -1469,6 +1552,9 @@ Before releasing a change:
 - [ ] Structural marker drift blocks project validation until an approved `/ai-refresh`.
 - [ ] The reviewer remains effectively read-only.
 - [ ] The reviewer and quick reviewer deny shell access and receive only the evidence packet.
+- [ ] The diagnostician denies edit, shell, and subagent access and receives only sanitized evidence.
+- [ ] Diagnostic state persists blocked, confirmed, and escalated outcomes; enforces the one-to-three iteration ceiling; and rejects unsupported confirmation.
+- [ ] Only a validated `ROOT_CAUSE_CONFIRMED` run can seed a standard run with `sourceRunId`.
 - [ ] The quick reviewer remains read-only and the quick-fix agent cannot delegate to standard implementation agents.
 - [ ] The fast-path classifier accepts a compliant estimate and actual diff, and returns exit code 3 for every excluded risk and exceeded limit.
 - [ ] Actual fast-path scope is derived from the Git diff and untracked files, not agent-supplied counts.
@@ -1573,6 +1659,14 @@ Run `/ai-refresh`. Review the changed manifests, language set, module candidates
 
 Use `/run-status <run-id>` to identify the current legal state and validate artifact hashes. A changed `HEAD`, changed post-gate diff, or a commit whose patch differs from the reviewed gate fingerprint is an intentional stop: create a new plan or return through an explicitly approved correction cycle.
 
+### `DIAGNOSIS_BLOCKED`
+
+The current sanitized evidence cannot distinguish the remaining hypotheses. Read `missingEvidence` in the canonical diagnosis artifact and provide only the smallest requested log, metric, trace, deployment fact, timestamp, or reproduction result. Do not edit the run artifact. After explicit approval, the orchestrator uses `BeginDiagnosticIteration` and records a new validated conclusion. If the configured limit is exhausted, escalate rather than guessing.
+
+### A diagnosis cannot be handed to `/ticket`
+
+Run `/run-status <diagnostic-run-id>` and require `ROOT_CAUSE_CONFIRMED`. The handoff rejects blocked, escalated, missing, schema-invalid, hash-mismatched, or tampered diagnoses. Use the exact syntax `/ticket diagnosis:<run-id>`; do not copy a root-cause sentence into a new ticket and discard its evidence provenance.
+
 ### `ESCALATE_STANDARD`
 
 The deterministic fast-path classifier found an exceeded limit, missing prerequisite, or excluded risk. This is a routing verdict, not a failed implementation. Preserve the requirement, evidence, proposed files, and verification commands, then continue with `/ticket` and the standard workflow.
@@ -1619,6 +1713,8 @@ The workflow reports retrieval gaps and does not fall back to a write-capable op
 - GitHub CLI is required for draft PR creation.
 - The workflow does not mark PRs ready, request reviewers, apply labels, merge, release, or deploy.
 - The workflow does not configure CI/CD or deployment automatically.
+- Production diagnosis analyzes repository evidence and sanitized evidence supplied by the user; it does not connect to observability platforms or production systems automatically.
+- Diagnostic confirmation reduces speculation but does not replace incident command, security response, compliance, data-recovery, or production-operations procedures.
 - File installation and updates perform full conflict preflight, but are not transactional against unexpected filesystem failures.
 - Local installations are intentionally clone-specific. A new clone must install the workflow again.
 - Local mode depends on `.git/info/exclude`; it cannot hide workflow paths that are already tracked.
