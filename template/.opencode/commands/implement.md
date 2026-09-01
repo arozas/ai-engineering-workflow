@@ -7,4 +7,4 @@ Implement only an exact plan recorded as `PLAN_APPROVED` in persisted workflow s
 
 Load `workflow-state`. Resolve exactly one approved run or require the user to name its run ID. Validate the run and call `BeginImplementation`; if no persisted approved plan exists, stop and ask the user to run `/ticket` or approve its proposal. Delegate the persisted requirement, hashed plan, constraints, expected diff budget, selected module context, and quality commands to `developer`.
 
-After implementation, require exact `quality-gate` results and record their evidence with `RecordGates`. Do not silently expand scope and do not begin reviewer/developer correction loops unless the user requested the full workflow.
+After implementation, run `.ai/scripts/run-quality-gates.ps1` with the affected module IDs and record its unedited `.ai/runtime/gates.json` through `RecordGates`. A prose summary or manually authored JSON is not gate evidence. Do not silently expand scope and do not begin reviewer/developer correction loops unless the user requested the full workflow.

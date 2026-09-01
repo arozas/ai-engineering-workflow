@@ -82,6 +82,101 @@ function Get-WorktreeFingerprint([string]$RepositoryRoot, [string]$CurrentSha) {
     }
 }
 
+function Get-ControlPlaneFingerprint([string]$RepositoryRoot) {
+    $records = [Collections.Generic.List[string]]::new()
+    foreach ($relativeRoot in @('AGENTS.md', 'opencode.json', '.ai', '.opencode')) {
+        $absoluteRoot = Join-Path $RepositoryRoot $relativeRoot
+        if (Test-Path -LiteralPath $absoluteRoot -PathType Leaf) {
+            $normalized = [IO.Path]::GetRelativePath($RepositoryRoot, $absoluteRoot).Replace('\', '/')
+            $records.Add($normalized + "`t" + (Get-FileSha256 -Path $absoluteRoot))
+            continue
+        }
+        if (-not (Test-Path -LiteralPath $absoluteRoot -PathType Container)) { continue }
+        foreach ($file in Get-ChildItem -LiteralPath $absoluteRoot -Recurse -Force -File) {
+            $normalized = [IO.Path]::GetRelativePath($RepositoryRoot, $file.FullName).Replace('\', '/')
+            if ($normalized -match '^\.ai/(?:runtime|runs)(?:/|$)') { continue }
+            $records.Add($normalized + "`t" + (Get-FileSha256 -Path $file.FullName))
+        }
+    }
+    return Get-StringSha256 -Value ((@($records | Sort-Object)) -join "`n")
+}
+
+function Assert-ControlPlane([System.Collections.IDictionary]$State, [string]$RepositoryRoot) {
+    if (-not $State.Contains('controlPlaneFingerprint') -or [string]::IsNullOrWhiteSpace([string]$State.controlPlaneFingerprint)) {
+        throw 'This run predates deterministic control-plane protection. Start a new run before continuing.'
+    }
+    $current = Get-ControlPlaneFingerprint -RepositoryRoot $RepositoryRoot
+    if ($current -ne [string]$State.controlPlaneFingerprint) {
+        throw 'Workflow control plane changed after the run started. Restore or approve the configuration change, then start a new run.'
+    }
+}
+
+function Get-ValidatedGateEvidence([string]$SourcePath, [string]$RepositoryRoot) {
+    $expectedPath = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot '.ai\runtime\gates.json'))
+    if ([IO.Path]::GetFullPath($SourcePath) -ne $expectedPath) {
+        throw 'RecordGates accepts evidence only from .ai/runtime/gates.json.'
+    }
+    $gateSchemaPath = Join-Path $RepositoryRoot '.ai\quality-gates.schema.json'
+    $projectPath = Join-Path $RepositoryRoot '.ai\project.json'
+    $runnerPath = Join-Path $RepositoryRoot '.ai\scripts\run-quality-gates.ps1'
+    foreach ($requiredPath in @($gateSchemaPath, $projectPath, $runnerPath)) {
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) { throw "Required gate validation input not found: $requiredPath" }
+    }
+
+    $json = Get-Content -LiteralPath $SourcePath -Raw
+    $schema = Get-Content -LiteralPath $gateSchemaPath -Raw
+    if (-not ($json | Test-Json -Schema $schema -ErrorAction Stop)) { throw 'Quality-gate evidence failed schema validation.' }
+    $evidence = $json | ConvertFrom-Json
+    if ([string]$evidence.projectSha256 -ne (Get-FileSha256 -Path $projectPath)) {
+        throw 'Quality-gate evidence was produced from a different .ai/project.json.'
+    }
+    if ([string]$evidence.runnerSha256 -ne (Get-FileSha256 -Path $runnerPath)) {
+        throw 'Quality-gate evidence was produced by a different runner version.'
+    }
+
+    $derivedModuleStatuses = @()
+    foreach ($module in @($evidence.modules)) {
+        $commands = @($module.phases | ForEach-Object { @($_.commands) })
+        if ([int]$module.configuredCommandCount -ne $commands.Count) {
+            throw "Quality-gate command count mismatch for module '$($module.id)'."
+        }
+        $derivedModuleStatus = if ($commands.Count -eq 0) {
+            'INCOMPLETE_CONFIGURATION'
+        }
+        elseif (@($commands | Where-Object { [string]$_.status -ne 'PASS' }).Count -gt 0) {
+            'FAIL'
+        }
+        else { 'PASS' }
+        if ([string]$module.overall -ne $derivedModuleStatus) {
+            throw "Quality-gate module verdict mismatch for '$($module.id)'."
+        }
+        $derivedModuleStatuses += $derivedModuleStatus
+    }
+
+    if ([bool]$evidence.worktreeStable -ne ([string]$evidence.startedWorktreeFingerprint -eq [string]$evidence.worktreeFingerprint)) {
+        throw 'Quality-gate worktree stability flag is inconsistent with its fingerprints.'
+    }
+    $derivedOverall = if (-not [bool]$evidence.worktreeStable -or $derivedModuleStatuses -contains 'FAIL') {
+        'FAIL'
+    }
+    elseif ($derivedModuleStatuses -contains 'INCOMPLETE_CONFIGURATION') {
+        'INCOMPLETE_CONFIGURATION'
+    }
+    else { 'PASS' }
+    if ([string]$evidence.overall -ne $derivedOverall) { throw 'Quality-gate overall verdict does not match command evidence.' }
+
+    $currentSha = Get-CurrentSha -RepositoryRoot $RepositoryRoot
+    $currentFingerprint = Get-WorktreeFingerprint -RepositoryRoot $RepositoryRoot -CurrentSha $currentSha
+    if ($currentFingerprint -ne [string]$evidence.worktreeFingerprint) {
+        throw 'Worktree changed after deterministic quality gates ran.'
+    }
+    return [pscustomobject]@{
+        Verdict = if ($derivedOverall -eq 'PASS') { 'PASS' } else { 'FAIL' }
+        Overall = $derivedOverall
+        WorktreeFingerprint = [string]$evidence.worktreeFingerprint
+    }
+}
+
 function Get-CommitFingerprint([string]$RepositoryRoot, [string]$ParentSha, [string]$CommitSha) {
     $baseline = if ($ParentSha -eq 'UNBORN') { '4b825dc642cb6eb9a060e54bf8d69288fbee4904' } else { $ParentSha }
     $diff = @(& git -C $RepositoryRoot diff --binary --no-ext-diff $baseline $CommitSha --)
@@ -204,6 +299,7 @@ if ($Action -eq 'Start') {
         baseSha = $sha
         currentSha = $sha
         worktreeFingerprint = $null
+        controlPlaneFingerprint = Get-ControlPlaneFingerprint -RepositoryRoot $repositoryRoot
         correctionIterations = 0
         maximumCorrectionIterations = $maximumCorrections
         diagnosticIterations = 0
@@ -223,6 +319,7 @@ else {
         'ApprovePlan' {
             Assert-Status -State $state -Allowed @('PLANNING')
             Assert-Head -State $state -RepositoryRoot $repositoryRoot
+            Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
             $source = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
             Add-Artifact -State $state -Name 'plan' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict 'PASS'
             $state.status = 'PLAN_APPROVED'
@@ -231,22 +328,29 @@ else {
         'BeginImplementation' {
             Assert-Status -State $state -Allowed @('PLAN_APPROVED')
             Assert-Head -State $state -RepositoryRoot $repositoryRoot
+            Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
             $state.status = 'IMPLEMENTING'
             Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath
         }
         'RecordGates' {
             Assert-Status -State $state -Allowed @('IMPLEMENTING')
             Assert-Head -State $state -RepositoryRoot $repositoryRoot
+            Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
             if (@('PASS', 'FAIL') -notcontains $Verdict) { throw 'RecordGates requires Verdict PASS or FAIL.' }
             $source = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
+            $gateEvidence = Get-ValidatedGateEvidence -SourcePath $source -RepositoryRoot $repositoryRoot
+            if ($Verdict -ne [string]$gateEvidence.Verdict) {
+                throw "RecordGates verdict '$Verdict' does not match deterministic evidence '$($gateEvidence.Overall)'."
+            }
             Add-Artifact -State $state -Name 'gates' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict $Verdict
-            $state.worktreeFingerprint = Get-WorktreeFingerprint -RepositoryRoot $repositoryRoot -CurrentSha ([string]$state.currentSha)
+            $state.worktreeFingerprint = [string]$gateEvidence.WorktreeFingerprint
             $state.status = if ($Verdict -eq 'PASS') { 'GATES_PASSED' } else { 'GATE_FAILED' }
             Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath
         }
         'RecordReview' {
             Assert-Status -State $state -Allowed @('GATES_PASSED')
             Assert-Head -State $state -RepositoryRoot $repositoryRoot
+            Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
             if ([string]::IsNullOrWhiteSpace($Verdict)) { throw 'RecordReview requires a verdict.' }
             $currentFingerprint = Get-WorktreeFingerprint -RepositoryRoot $repositoryRoot -CurrentSha ([string]$state.currentSha)
             if ($currentFingerprint -ne [string]$state.worktreeFingerprint) { throw 'Worktree changed after gates; rerun the complete gate before review.' }
@@ -263,6 +367,7 @@ else {
         'BeginCorrection' {
             Assert-Status -State $state -Allowed @('GATE_FAILED', 'REVIEW_FAILED')
             Assert-Head -State $state -RepositoryRoot $repositoryRoot
+            Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
             $next = [int]$state.correctionIterations + 1
             if ($next -gt [int]$state.maximumCorrectionIterations) { throw 'Correction limit reached; escalate instead of continuing.' }
             $state.correctionIterations = $next
@@ -310,6 +415,7 @@ else {
         }
         'RecordCommit' {
             Assert-Status -State $state -Allowed @('READY_FOR_DELIVERY')
+            Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
             $newSha = Get-CurrentSha -RepositoryRoot $repositoryRoot
             if ($newSha -eq [string]$state.currentSha -or $newSha -eq 'UNBORN') { throw 'RecordCommit requires one new commit.' }
             $parents = @(& git -C $repositoryRoot show -s --format=%P $newSha)

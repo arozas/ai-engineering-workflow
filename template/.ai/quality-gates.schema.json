@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI Engineering Workflow deterministic quality-gate evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "generatedAtUtc",
+    "completedAtUtc",
+    "projectPath",
+    "projectSha256",
+    "runnerSha256",
+    "startedWorktreeFingerprint",
+    "worktreeFingerprint",
+    "worktreeStable",
+    "overall",
+    "modules"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "generatedAtUtc": { "type": "string", "format": "date-time" },
+    "completedAtUtc": { "type": "string", "format": "date-time" },
+    "projectPath": { "const": ".ai/project.json" },
+    "projectSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "runnerSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "startedWorktreeFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "worktreeFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "worktreeStable": { "type": "boolean" },
+    "overall": { "enum": ["PASS", "FAIL", "INCOMPLETE_CONFIGURATION"] },
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/module" }
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "workingDirectory", "status", "exitCode", "durationMilliseconds", "timedOut", "stdout", "stderr", "outputTruncated"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "workingDirectory": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["PASS", "FAIL", "NOT_RUN"] },
+        "exitCode": { "type": ["integer", "null"] },
+        "durationMilliseconds": { "type": ["integer", "null"], "minimum": 0 },
+        "timedOut": { "type": "boolean" },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "outputTruncated": { "type": "boolean" }
+      }
+    },
+    "phase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status", "commands"],
+      "properties": {
+        "name": { "enum": ["restore", "build", "lint", "typecheck", "test", "e2e"] },
+        "status": { "enum": ["PASS", "FAIL", "NOT_RUN", "NOT_CONFIGURED"] },
+        "commands": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/command" }
+        }
+      }
+    },
+    "module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "overall", "configuredCommandCount", "phases"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "path": { "type": "string", "minLength": 1 },
+        "overall": { "enum": ["PASS", "FAIL", "INCOMPLETE_CONFIGURATION"] },
+        "configuredCommandCount": { "type": "integer", "minimum": 0 },
+        "phases": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": { "$ref": "#/$defs/phase" }
+        }
+      }
+    }
+  }
+}

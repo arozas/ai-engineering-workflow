@@ -48,7 +48,7 @@ try {
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-Mode', 'Local') | Out-Null
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local installation remains invisible to Git.'
     $metadata = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\workflow-installation.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($metadata.workflowVersion -eq '1.6.0') -Message 'Installed metadata records version 1.6.0.'
+    Assert-True -Condition ($metadata.workflowVersion -eq '1.7.0') -Message 'Installed metadata records version 1.7.0.'
 
     $profileScript = Join-Path $repositoryRoot '.ai\scripts\profile-project.ps1'
     $profileOutput = Invoke-PowerShell -ScriptPath $profileScript -Arguments @('-OutputPath', '.ai/project-profile.json') -WorkingDirectory $repositoryRoot
@@ -124,6 +124,19 @@ Applies to `src/app`.
     Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\validate-project.ps1') -Arguments @() -WorkingDirectory $repositoryRoot | Out-Null
     Assert-True -Condition $true -Message 'A profiled project and generated module skill pass deterministic validation.'
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local personalization artifacts remain invisible to Git.'
+
+    $gateRunner = Join-Path $repositoryRoot '.ai\scripts\run-quality-gates.ps1'
+    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-ModuleId', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    $gateEvidence = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\runtime\gates.json') -Raw | ConvertFrom-Json
+    Assert-True -Condition ($gateEvidence.overall -eq 'PASS' -and $gateEvidence.modules[0].phases[4].commands[0].exitCode -eq 0 -and $gateEvidence.worktreeStable) -Message 'The deterministic gate runner derives PASS from a real command and stable worktree fingerprints.'
+
+    $project.modules[0].quality.test = @('pwsh -NoProfile -Command "exit 7"')
+    $project | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\project.json') -Encoding utf8
+    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-ModuleId', 'app') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    $failedGateEvidence = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\runtime\gates.json') -Raw | ConvertFrom-Json
+    Assert-True -Condition ($failedGateEvidence.overall -eq 'FAIL' -and $failedGateEvidence.modules[0].phases[4].commands[0].exitCode -eq 7) -Message 'The deterministic gate runner derives FAIL and preserves the real nonzero exit code.'
+    $project.modules[0].quality.test = @('pwsh -NoProfile -Command "exit 0"')
+    $project | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\project.json') -Encoding utf8
 
     $ordinarySource = Join-Path $sourceRoot 'ordinary.txt'
     Set-Content -LiteralPath $ordinarySource -Value 'ordinary source growth' -Encoding utf8
@@ -255,6 +268,17 @@ Applies to `src/app`.
     Assert-True -Condition ($classificationJson.verdict -eq 'FAST_PATH_ELIGIBLE' -and $classificationJson.observed.fileCount -eq 2 -and $classificationJson.observed.moduleCount -eq 1) -Message 'Actual fast-path scope is derived from tracked and untracked Git changes.'
 
     Set-Content -LiteralPath (Join-Path $runtimeRoot 'gates.json') -Value '{"overall":"PASS"}' -Encoding utf8
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordGates', '-RunId', $runId, '-ArtifactPath', '.ai/runtime/gates.json', '-Verdict', 'PASS') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Assert-True -Condition $true -Message 'Workflow state rejects an agent-authored PASS artifact without deterministic command evidence.'
+
+    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-ModuleId', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    $installedDeveloperPath = Join-Path $repositoryRoot '.opencode\agents\developer.md'
+    $installedDeveloperBytes = [IO.File]::ReadAllBytes($installedDeveloperPath)
+    Add-Content -LiteralPath $installedDeveloperPath -Value "`nunauthorized control-plane mutation"
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordGates', '-RunId', $runId, '-ArtifactPath', '.ai/runtime/gates.json', '-Verdict', 'PASS') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    [IO.File]::WriteAllBytes($installedDeveloperPath, $installedDeveloperBytes)
+    Assert-True -Condition $true -Message 'A control-plane mutation invalidates the run before gate evidence can advance state.'
+
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordGates', '-RunId', $runId, '-ArtifactPath', '.ai/runtime/gates.json', '-Verdict', 'PASS') -WorkingDirectory $repositoryRoot | Out-Null
 
     $canonicalPlanPath = Join-Path $repositoryRoot ".ai\runs\$runId\plan.md"
@@ -286,6 +310,9 @@ Applies to `src/app`.
     $reviewer = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\reviewer.md') -Raw
     $quickReviewer = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\quick-reviewer.md') -Raw
     Assert-True -Condition ($reviewer -notmatch 'resource:\s*"git ' -and $quickReviewer -notmatch 'resource:\s*"git ') -Message 'Review agents expose no shell exceptions.'
+    $developer = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\developer.md') -Raw
+    $quickFix = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\quick-fix.md') -Raw
+    Assert-True -Condition ($developer -match 'resource:\s*"\.ai/\*"\s+effect:\s*deny' -and $quickFix -match 'resource:\s*"\.ai/runtime/gates\.json"\s+effect:\s*deny') -Message 'Implementation agents deny control-plane edits and direct gate-evidence writes.'
 
     $benchmarkPath = Join-Path $testRoot 'benchmark.json'
     $benchmarkSummaryPath = Join-Path $testRoot 'benchmark-summary.md'

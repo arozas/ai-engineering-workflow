@@ -43,6 +43,7 @@
     "baseSha": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|UNBORN)$" },
     "currentSha": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|UNBORN)$" },
     "worktreeFingerprint": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "controlPlaneFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "correctionIterations": { "type": "integer", "minimum": 0, "maximum": 3 },
     "maximumCorrectionIterations": { "type": "integer", "minimum": 1, "maximum": 3 },
     "diagnosticIterations": { "type": "integer", "minimum": 0, "maximum": 3 },

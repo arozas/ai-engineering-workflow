@@ -59,7 +59,9 @@ Do not guess missing project conventions. Report uncertainty and ask for approva
 
 ## Deterministic quality policy
 
-LLM judgment never overrides command results. A gate passes only when every configured command exits successfully, in the configured order. Missing, skipped, or unexecuted required commands must be reported as NOT RUN, never PASS.
+LLM judgment never overrides command results. Quality gates must run through `.ai/scripts/run-quality-gates.ps1`; agents must never create or edit `.ai/runtime/gates.json` manually. A gate passes only when every configured command exits successfully, in the configured order, and the worktree remains unchanged during verification. Missing, skipped, or unexecuted required commands must be reported as NOT RUN, never PASS. `RecordGates` independently validates the gate schema, project and runner hashes, derived verdict, worktree fingerprint, and control-plane fingerprint.
+
+`AGENTS.md`, `opencode.json`, `.ai/`, and `.opencode/` form the workflow control plane. Developer and quick-fix work must not modify it. Agent permissions block direct control-plane edits, and persisted runs fingerprint the control plane so a change invalidates later gate, review, and delivery transitions. Configuration changes require a separate explicitly approved task and a new workflow run.
 
 ## Review policy
 

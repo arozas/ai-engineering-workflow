@@ -37,12 +37,14 @@ foreach ($required in @(
     'template\.ai\bootstrap-input.schema.json',
     'template\.ai\workflow-installation.schema.json',
     'template\.ai\workflow-run.schema.json',
+    'template\.ai\quality-gates.schema.json',
     'template\.ai\diagnosis.schema.json',
     'template\.ai\pull-request-template.md',
     'template\.ai\scripts\fast-path-check.ps1',
     'template\.ai\scripts\profile-project.ps1',
     'template\.ai\scripts\validate-project.ps1',
     'template\.ai\scripts\workflow-state.ps1',
+    'template\.ai\scripts\run-quality-gates.ps1',
     'template\.ai\scripts\validate-diagnosis.ps1',
     'template\.ai\scripts\validate-commit-message.ps1',
     'template\.ai\scripts\commit-approved.ps1',
@@ -115,7 +117,7 @@ $openCodeConfigContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'temp
 if ($openCodeConfigContent -notmatch [regex]::Escape('pwsh -NoProfile -File .ai/scripts/fast-path-check.ps1 *')) {
     $errors += 'opencode.json must allow the deterministic fast-path classifier.'
 }
-foreach ($managedScript in @('validate-project.ps1', 'workflow-state.ps1', 'profile-project.ps1', 'validate-diagnosis.ps1')) {
+foreach ($managedScript in @('validate-project.ps1', 'workflow-state.ps1', 'profile-project.ps1', 'validate-diagnosis.ps1', 'run-quality-gates.ps1')) {
     if ($openCodeConfigContent -notmatch [regex]::Escape("pwsh -NoProfile -File .ai/scripts/$managedScript *")) {
         $errors += "opencode.json must allow managed script $managedScript."
     }
@@ -126,12 +128,39 @@ foreach ($sensitivePattern in @('*.npmrc', '*.pypirc', '*.pem', '*.key', '*crede
 }
 
 $quickFixAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\quick-fix.md') -Raw
+$developerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\developer.md') -Raw
 $quickReviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\quick-reviewer.md') -Raw
 if ($quickFixAgentContent -notmatch '(?m)^steps:\s*16\s*$') {
     $errors += 'quick-fix agent must keep its bounded 16-step budget.'
 }
 if ($quickReviewerAgentContent -notmatch '(?m)^steps:\s*8\s*$') {
     $errors += 'quick-reviewer agent must keep its bounded 8-step budget.'
+}
+foreach ($agentDefinition in @{
+    'developer' = $developerAgentContent
+    'quick-fix' = $quickFixAgentContent
+}.GetEnumerator()) {
+    foreach ($protectedPath in @('.ai/*', '.opencode/*', '*AGENTS.md', '*opencode.json')) {
+        $pattern = '(?ms)- action:\s*edit\s+resource:\s*"' + [regex]::Escape($protectedPath) + '"\s+effect:\s*deny'
+        if ($agentDefinition.Value -notmatch $pattern) {
+            $errors += "$($agentDefinition.Key) must deny direct edits to control-plane path $protectedPath."
+        }
+    }
+}
+if ($quickFixAgentContent -notmatch '(?ms)- action:\s*edit\s+resource:\s*"\.ai/runtime/gates\.json"\s+effect:\s*deny') {
+    $errors += 'quick-fix must not write deterministic gate evidence directly.'
+}
+$qualityRunnerContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\run-quality-gates.ps1') -Raw
+$workflowStateContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\workflow-state.ps1') -Raw
+foreach ($requiredRunnerToken in @('quality-gates.schema.json', 'startedWorktreeFingerprint', 'runnerSha256', 'configuredCommandCount')) {
+    if ($qualityRunnerContent -notmatch [regex]::Escape($requiredRunnerToken)) {
+        $errors += "Quality-gate runner is missing deterministic evidence field or check: $requiredRunnerToken."
+    }
+}
+foreach ($requiredStateToken in @('Get-ValidatedGateEvidence', 'Get-ControlPlaneFingerprint', 'Assert-ControlPlane')) {
+    if ($workflowStateContent -notmatch [regex]::Escape($requiredStateToken)) {
+        $errors += "Workflow state is missing deterministic protection: $requiredStateToken."
+    }
 }
 $reviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\reviewer.md') -Raw
 $diagnosticianAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\diagnostician.md') -Raw
