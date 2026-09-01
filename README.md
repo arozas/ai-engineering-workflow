@@ -21,6 +21,7 @@ The workflow turns tickets, specifications, and written requirements into eviden
 - [Bootstrap](#bootstrap)
 - [Working with tickets and specifications](#working-with-tickets-and-specifications)
 - [Agents](#agents)
+- [Model selection](#model-selection)
 - [Skills](#skills)
 - [Project configuration](#project-configuration)
 - [Deterministic quality gates](#deterministic-quality-gates)
@@ -658,6 +659,92 @@ Commands are intentionally composable. `/implement` does not silently start repe
 
 The orchestrator can delegate only to `developer`, `reviewer`, `tester`, `delivery`, and OpenCode's read-only `explore` agent.
 
+## Model selection
+
+The base distribution deliberately does not pin a provider or model. This keeps the workflow portable across OpenCode providers, authentication methods, budgets, and future model releases. When an agent has no explicit `model` field, the primary agent uses the globally or session-selected model, and a subagent inherits the model of the primary agent that invoked it.
+
+OpenCode supports a model override in each agent definition. Model identifiers use the exact `provider-id/model-id` format documented by OpenCode; display names, marketing names, and aliases must not be guessed.
+
+### Discover available model IDs
+
+Configure each required provider in OpenCode:
+
+```text
+/connect
+```
+
+Then inspect the models actually available to the current OpenCode installation and authenticated providers:
+
+```text
+/models
+```
+
+Copy the exact identifier shown by OpenCode. Availability varies by provider, account, region, subscription, and OpenCode version. The workflow documentation therefore recommends model capabilities rather than hard-coding product names that may become unavailable or obsolete.
+
+Official references:
+
+- [OpenCode agents: agent-specific model overrides and inheritance](https://opencode.ai/docs/agents/)
+- [OpenCode models: provider configuration, model selection, IDs, and variants](https://opencode.ai/docs/models/)
+- [OpenCode providers: authentication and provider setup](https://opencode.ai/docs/providers/)
+- [OpenCode configuration reference](https://opencode.ai/docs/config/)
+
+### Recommended model classes by agent
+
+| Agent | Recommended model class | Why this class is appropriate |
+| --- | --- | --- |
+| `orchestrator` | Frontier reasoning and tool-use model | The orchestrator interprets incomplete requirements, resolves repository evidence, produces bounded plans, coordinates specialized agents, and decides when human approval is required. Strong reasoning and reliable tool use matter more than low per-call cost. |
+| `developer` | Frontier coding model | The developer must understand an approved plan, navigate an existing codebase, preserve architecture and conventions, implement the smallest correct change, and diagnose quality-gate failures. Strong code generation and repository-scale context handling reduce rework. |
+| `reviewer` | Strong analytical and reasoning model | The reviewer must independently detect correctness, security, architecture, regression, and test-coverage problems without editing code. Analytical precision and calibrated severity are more important than generation speed. |
+| `tester` | Fast, cost-efficient coding model | Test work is usually narrower and more repetitive: translate acceptance criteria into scenarios, add focused tests in known locations, and report deterministic results. A reliable smaller model can often do this efficiently, provided it follows constraints and handles the target stack well. |
+| `delivery` | Deterministic, low-variance, cost-efficient tool-use model | Delivery operations are intentionally narrow and protected by deterministic scripts. The model should follow exact instructions, preserve arguments and file lists, and stop after one approved operation; creative implementation ability is unnecessary. |
+
+These are defaults for role design, not guarantees. Increase model capability when the repository, language, security profile, or ticket complexity demands it. A model assigned to any agent must support the tool-calling behavior required by that agent.
+
+### Configure a model in an agent definition
+
+Agent models are configured in YAML frontmatter. The following values are placeholders; replace them with exact IDs copied from `/models`.
+
+For the orchestrator:
+
+```yaml
+---
+description: Plans and coordinates the human-gated engineering workflow without implementing production code directly
+mode: primary
+model: provider-id/frontier-reasoning-model-id
+color: "#4f8cff"
+steps: 30
+permissions:
+  # Existing orchestrator permissions remain here.
+---
+```
+
+For the developer:
+
+```yaml
+---
+description: Implements only an approved plan and reports any evidence that invalidates it
+mode: subagent
+model: provider-id/frontier-coding-model-id
+color: "#36b37e"
+steps: 40
+permissions:
+  # Existing developer permissions remain here.
+---
+```
+
+Use the same `model` field in `reviewer.md`, `tester.md`, or `delivery.md` when those agents need explicit overrides. Model selection does not change permissions, step limits, approval requirements, read-only boundaries, or delivery safeguards.
+
+### Distribution default versus consumer customization
+
+Choose the configuration location deliberately:
+
+- Edit `template/.opencode/agents/<agent-id>.md` in this distribution when the model policy should become the versioned default for future consumer installations. Treat that choice as a compatibility decision, update the distribution version, document the provider requirement, and validate a fresh consumer.
+- Edit `.opencode/agents/<agent-id>.md` inside an installed consumer when the assignment applies only to that repository or clone. The change takes effect for that consumer, but it modifies a hash-managed workflow file.
+
+The updater intentionally reports a conflict when an installed agent definition no longer matches its recorded hash. It never overwrites a consumer-specific model assignment. Before updating such an installation, compare the new distribution agent with the customized file and reapply the desired `model` field during a reviewed manual merge.
+
+For the least maintenance and widest portability, leave the base distribution unpinned and add explicit model overrides only where the role, repository, or organization has a stable provider requirement.
+
 ## Skills
 
 Skills are discovered from `.opencode/skills/` and loaded on demand.
@@ -1115,6 +1202,7 @@ The frontmatter `name` must match the directory name.
 - Include YAML frontmatter with at least a useful description.
 - Keep permissions narrowly aligned with the agent's responsibility.
 - Do not pin a model unless the distribution intentionally adopts that model as a compatibility requirement.
+- When pinning a model, use an exact `provider-id/model-id` obtained from OpenCode `/models`, document the provider dependency, and validate the agent in a fresh consumer repository.
 
 ### Change the consumer payload
 
@@ -1273,10 +1361,12 @@ Current OpenCode V2 accepts an `instructions` field in `opencode.json` but does 
 
 Relevant documentation:
 
-- [OpenCode V2 instructions](https://opencode.ai/v2/docs/instructions/)
-- [OpenCode V2 agents](https://opencode.ai/v2/docs/agents/)
-- [OpenCode V2 commands](https://opencode.ai/v2/docs/commands/)
-- [OpenCode skills](https://opencode.ai/docs/skills)
-- [OpenCode V2 configuration](https://opencode.ai/v2/docs/config/)
+- [OpenCode rules and instructions](https://opencode.ai/docs/rules/)
+- [OpenCode agents](https://opencode.ai/docs/agents/)
+- [OpenCode models](https://opencode.ai/docs/models/)
+- [OpenCode providers](https://opencode.ai/docs/providers/)
+- [OpenCode commands](https://opencode.ai/docs/commands/)
+- [OpenCode skills](https://opencode.ai/docs/skills/)
+- [OpenCode configuration](https://opencode.ai/docs/config/)
 
 Because OpenCode V2 is still evolving, keep the workflow versioned, run deterministic distribution validation, and smoke-test a consumer repository before adopting a new CLI release.
