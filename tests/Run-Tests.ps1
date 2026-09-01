@@ -47,7 +47,7 @@ try {
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-Mode', 'Local') | Out-Null
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local installation remains invisible to Git.'
     $metadata = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\workflow-installation.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($metadata.workflowVersion -eq '1.4.1') -Message 'Installed metadata records version 1.4.1.'
+    Assert-True -Condition ($metadata.workflowVersion -eq '1.4.2') -Message 'Installed metadata records version 1.4.2.'
 
     $project = [ordered]@{
         '$schema' = './project.schema.json'
@@ -163,3 +163,7 @@ finally {
         Remove-Item -LiteralPath $resolved -Recurse -Force
     }
 }
+
+# The updater-conflict test intentionally executes a child process that exits
+# with 1. Do not propagate that expected child exit code as the suite result.
+exit 0

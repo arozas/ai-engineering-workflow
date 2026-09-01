@@ -1,7 +1,7 @@
 {
   "$schema": "./workflow.manifest.schema.json",
   "name": "ai-engineering-workflow",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "templatePath": "template",
   "installationMetadata": ".ai/workflow-installation.json",
   "scripts": {
