@@ -101,9 +101,9 @@ function Get-GitRepositoryInfo {
         throw "Local installation requires an initialized Git repository: $TargetRoot"
     }
 
-    $topLevel = [System.IO.Path]::GetFullPath([string]$topLevelOutput[0]).TrimEnd('\', '/')
-    $targetFull = [System.IO.Path]::GetFullPath($TargetRoot).TrimEnd('\', '/')
-    if ($topLevel -ne $targetFull) {
+    $topLevel = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath ([string]$topLevelOutput[0])).Path).TrimEnd('\', '/')
+    $prefixOutput = @(& $gitCommand.Source -C $TargetRoot rev-parse --show-prefix 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not [string]::IsNullOrEmpty(($prefixOutput -join ''))) {
         throw "The local workflow must be installed at the Git repository root. Repository root: $topLevel"
     }
 

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI Engineering Workflow benchmark results",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "suiteName", "scenarios"],
+  "properties": {
+    "version": { "const": 1 },
+    "suiteName": { "type": "string", "minLength": 1 },
+    "recordedAtUtc": { "type": "string", "format": "date-time" },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "category", "description", "runs"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "category": { "enum": ["bugfix", "small-task", "feature"] },
+          "description": { "type": "string", "minLength": 1 },
+          "runs": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/run" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workflowPath",
+        "modelProfile",
+        "inputTokens",
+        "outputTokens",
+        "costUsd",
+        "durationSeconds",
+        "correctionCycles",
+        "result",
+        "escapedDefects"
+      ],
+      "properties": {
+        "workflowPath": { "enum": ["manual", "standard", "fast-path"] },
+        "modelProfile": { "type": "string", "minLength": 1 },
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 },
+        "costUsd": { "type": "number", "minimum": 0 },
+        "durationSeconds": { "type": "number", "minimum": 0 },
+        "correctionCycles": { "type": "integer", "minimum": 0 },
+        "result": { "enum": ["PASS", "FAIL"] },
+        "escapedDefects": { "type": "integer", "minimum": 0 },
+        "notes": { "type": "string", "maxLength": 2000 }
+      }
+    }
+  }
+}

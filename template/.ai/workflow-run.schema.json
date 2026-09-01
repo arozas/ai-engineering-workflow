@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI Engineering Workflow persisted run state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "runId",
+    "workflowPath",
+    "taskType",
+    "status",
+    "baseSha",
+    "currentSha",
+    "correctionIterations",
+    "maximumCorrectionIterations",
+    "createdAtUtc",
+    "updatedAtUtc",
+    "artifacts"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+    "workflowPath": { "enum": ["standard", "fast-path"] },
+    "taskType": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "status": {
+      "enum": [
+        "PLANNING",
+        "PLAN_APPROVED",
+        "IMPLEMENTING",
+        "GATES_PASSED",
+        "GATE_FAILED",
+        "REVIEW_FAILED",
+        "READY_FOR_DELIVERY",
+        "COMMITTED",
+        "PUBLISHED",
+        "DRAFT_PR_CREATED",
+        "ESCALATED"
+      ]
+    },
+    "baseSha": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|UNBORN)$" },
+    "currentSha": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|UNBORN)$" },
+    "worktreeFingerprint": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "correctionIterations": { "type": "integer", "minimum": 0, "maximum": 3 },
+    "maximumCorrectionIterations": { "type": "integer", "minimum": 1, "maximum": 3 },
+    "createdAtUtc": { "type": "string", "format": "date-time" },
+    "updatedAtUtc": { "type": "string", "format": "date-time" },
+    "escalationReason": { "type": ["string", "null"], "maxLength": 2000 },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/artifact" },
+      "required": ["requirement"]
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^[^\\/]+$" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "verdict": { "enum": ["PASS", "FAIL", "ESCALATE"] }
+      }
+    }
+  }
+}

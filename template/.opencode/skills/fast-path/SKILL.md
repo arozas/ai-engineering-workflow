@@ -23,7 +23,7 @@ A fast-path task must:
 - avoid cross-module behavior
 - use no more than one correction cycle
 
-Use stricter `fastPath` thresholds from `.ai/project.json` when configured. Project settings may reduce the three-file, 120-line, and two-plus-two diagnosis budgets but may never increase them. Pass configured `maximumFiles` and `maximumLines` to the deterministic evaluator.
+Use stricter `fastPath` thresholds from `.ai/project.json` when configured. Project settings may reduce the three-file, 120-line, and two-plus-two diagnosis budgets but may never increase them. The evaluator reads project limits itself; never pass a looser override.
 
 Size alone never makes work low risk. Any security, data integrity, concurrency, migration, infrastructure, or public-contract impact requires escalation even when the diff is one line.
 
@@ -53,7 +53,7 @@ Before proposing an edit:
 6. Run `.ai/scripts/fast-path-check.ps1` with `-Phase Estimate`, configured maximums, and truthful arguments derived from the evidence.
 7. If it returns `ESCALATE_STANDARD` or cannot run, stop without editing and direct the user to `/ticket`.
 
-The policy evaluator is deterministic for its inputs; evidence is required so an agent cannot make the task eligible merely by omitting a known risk.
+Estimate classification is deterministic for declared evidence. Semantic risks still require honest judgment, so cite evidence for every false flag.
 
 ## Micro-plan and approval
 
@@ -79,11 +79,11 @@ Run the exact configured quality gates for the affected module. For a module-fre
 
 After implementation:
 
-1. Count actual changed files and actual added-plus-deleted lines for the approved scope.
-2. Re-evaluate all risk flags against the real diff.
-3. Run `.ai/scripts/fast-path-check.ps1` with `-Phase Actual`.
+1. Re-evaluate semantic risk flags against the real diff.
+2. Run `.ai/scripts/fast-path-check.ps1` with `-Phase Actual -BaseRef <persisted-base-sha>` and the semantic flags. Do not pass file, line, or module counts: the script derives them from Git, maps paths to configured modules, loads project limits, and detects conservative path risks.
+3. Compare the derived changed-file list with the approved micro-plan.
 4. If actual scope is ineligible, stop with `FAST PATH INVALIDATED`; do not continue modifying code.
-5. Delegate a compact independent review to `quick-reviewer`.
+5. Build the exact diff packet and delegate it to `quick-reviewer`, which has no shell access.
 
 ## Correction and completion
 

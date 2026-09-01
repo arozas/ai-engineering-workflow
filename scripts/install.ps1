@@ -87,6 +87,12 @@ Write-InstallationMetadata `
     -ShareProjectContext ($Mode -eq 'Local' -and $ShareProjectContext.IsPresent) `
     -LocalExcludedPaths $localPaths
 
+$writtenMetadataJson = Get-Content -LiteralPath $metadataPath -Raw
+$writtenMetadataSchema = Get-Content -LiteralPath (Join-Path (Get-TemplateRoot) '.ai\workflow-installation.schema.json') -Raw
+if (-not ($writtenMetadataJson | Test-Json -Schema $writtenMetadataSchema -ErrorAction Stop)) {
+    throw 'Installation metadata failed deterministic schema validation.'
+}
+
 if ($Mode -eq 'Local') {
     Assert-LocalPathsIgnored -GitRepository $gitRepository -RelativePaths $localPaths
     $gitStatusAfter = Get-GitStatusSnapshot -GitRepository $gitRepository

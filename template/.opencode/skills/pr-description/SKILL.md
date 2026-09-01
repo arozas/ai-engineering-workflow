@@ -14,6 +14,7 @@ Read `.ai/pull-request-template.md` and preserve its complete section order. Pro
 - acceptance-criteria mapping
 - tests and exact gate status
 - review verdict and residual findings
+- persisted run ID, state, base/current SHA, and evidence hashes
 - compatibility, migration, rollout, configuration, and rollback notes when relevant
 - risks and manual verification steps
 - reviewer checklist

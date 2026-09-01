@@ -24,13 +24,21 @@ foreach ($required in @(
     'scripts\install.ps1',
     'scripts\new-project.ps1',
     'scripts\update.ps1',
+    'scripts\summarize-evaluations.ps1',
+    'tests\Run-Tests.ps1',
+    '.github\workflows\validate.yml',
+    'evaluations\benchmark.schema.json',
+    'evaluations\README.md',
     'template\AGENTS.md',
     'template\opencode.json',
     'template\.ai\project.schema.json',
     'template\.ai\bootstrap-input.schema.json',
     'template\.ai\workflow-installation.schema.json',
+    'template\.ai\workflow-run.schema.json',
     'template\.ai\pull-request-template.md',
     'template\.ai\scripts\fast-path-check.ps1',
+    'template\.ai\scripts\validate-project.ps1',
+    'template\.ai\scripts\workflow-state.ps1',
     'template\.ai\scripts\validate-commit-message.ps1',
     'template\.ai\scripts\commit-approved.ps1',
     'template\.ai\scripts\publish-approved.ps1',
@@ -42,10 +50,12 @@ foreach ($required in @(
     'template\.opencode\commands\ai-bootstrap.md',
     'template\.opencode\commands\quick-fix.md',
     'template\.opencode\commands\small-task.md',
+    'template\.opencode\commands\run-status.md',
     'template\.opencode\commands\commit.md',
     'template\.opencode\commands\pr-create.md',
     'template\.opencode\skills\repo-bootstrap\SKILL.md',
     'template\.opencode\skills\fast-path\SKILL.md',
+    'template\.opencode\skills\workflow-state\SKILL.md',
     '.github\pull_request_template.md'
 )) {
     if (-not (Test-Path -LiteralPath (Join-Path $workflowRoot $required) -PathType Leaf)) {
@@ -55,7 +65,8 @@ foreach ($required in @(
 
 $projectSchemaPath = Join-Path $workflowRoot 'template\.ai\project.schema.json'
 if (Test-Path -LiteralPath $projectSchemaPath -PathType Leaf) {
-    $projectSchema = Get-Content -LiteralPath $projectSchemaPath -Raw | ConvertFrom-Json
+    $projectSchemaJson = Get-Content -LiteralPath $projectSchemaPath -Raw
+    $projectSchema = $projectSchemaJson | ConvertFrom-Json
     $fastPathSchema = $projectSchema.properties.fastPath
     if ($null -eq $fastPathSchema) {
         $errors += 'Project schema must define the optional fastPath policy.'
@@ -65,11 +76,38 @@ if (Test-Path -LiteralPath $projectSchemaPath -PathType Leaf) {
         $fastPathSchema.properties.maximumCorrectionIterations.const -ne 1) {
         $errors += 'Fast-path schema limits must remain bounded to 3 files, 120 lines, and one correction.'
     }
+    $projectExamplePath = Join-Path $workflowRoot 'template\.ai\project.example.json'
+    if (Test-Path -LiteralPath $projectExamplePath -PathType Leaf) {
+        try {
+            if (-not ((Get-Content -LiteralPath $projectExamplePath -Raw) | Test-Json -Schema $projectSchemaJson -ErrorAction Stop)) {
+                $errors += 'project.example.json does not validate against project.schema.json.'
+            }
+        }
+        catch { $errors += "Project example schema validation failed: $($_.Exception.Message)" }
+    }
 }
+
+try {
+    $manifestSchemaJson = Get-Content -LiteralPath (Join-Path $workflowRoot 'workflow.manifest.schema.json') -Raw
+    $manifestJson = Get-Content -LiteralPath (Join-Path $workflowRoot 'workflow.manifest.json') -Raw
+    if (-not ($manifestJson | Test-Json -Schema $manifestSchemaJson -ErrorAction Stop)) {
+        $errors += 'workflow.manifest.json does not validate against workflow.manifest.schema.json.'
+    }
+}
+catch { $errors += "Workflow manifest schema validation failed: $($_.Exception.Message)" }
 
 $openCodeConfigContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\opencode.json') -Raw
 if ($openCodeConfigContent -notmatch [regex]::Escape('pwsh -NoProfile -File .ai/scripts/fast-path-check.ps1 *')) {
     $errors += 'opencode.json must allow the deterministic fast-path classifier.'
+}
+foreach ($managedScript in @('validate-project.ps1', 'workflow-state.ps1')) {
+    if ($openCodeConfigContent -notmatch [regex]::Escape("pwsh -NoProfile -File .ai/scripts/$managedScript *")) {
+        $errors += "opencode.json must allow managed script $managedScript."
+    }
+}
+foreach ($sensitivePattern in @('*.npmrc', '*.pypirc', '*.pem', '*.key', '*credentials*.json', '*secrets*.json')) {
+    $escaped = [regex]::Escape('"resource": "' + $sensitivePattern + '", "effect": "deny"')
+    if ($openCodeConfigContent -notmatch $escaped) { $errors += "opencode.json must deny sensitive path pattern $sensitivePattern." }
 }
 
 $quickFixAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\quick-fix.md') -Raw
@@ -79,6 +117,18 @@ if ($quickFixAgentContent -notmatch '(?m)^steps:\s*16\s*$') {
 }
 if ($quickReviewerAgentContent -notmatch '(?m)^steps:\s*8\s*$') {
     $errors += 'quick-reviewer agent must keep its bounded 8-step budget.'
+}
+$reviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\reviewer.md') -Raw
+foreach ($reviewDefinition in @{
+    'reviewer' = $reviewerAgentContent
+    'quick-reviewer' = $quickReviewerAgentContent
+}.GetEnumerator()) {
+    if ($reviewDefinition.Value -notmatch '(?ms)- action:\s*shell\s+resource:\s*"\*"\s+effect:\s*deny') {
+        $errors += "$($reviewDefinition.Key) must deny all shell commands."
+    }
+    if ($reviewDefinition.Value -match '(?ms)- action:\s*shell\s+resource:\s*"(?!\*)[^"]+"\s+effect:\s*(allow|ask)') {
+        $errors += "$($reviewDefinition.Key) must not reopen shell permissions after the deny rule."
+    }
 }
 foreach ($commandName in @('quick-fix', 'small-task')) {
     $commandContent = Get-Content -LiteralPath (Join-Path $workflowRoot "template\.opencode\commands\$commandName.md") -Raw

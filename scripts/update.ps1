@@ -15,9 +15,17 @@ if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) {
     throw "Workflow installation metadata not found: $metadataPath"
 }
 
-$metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+$metadataJson = Get-Content -LiteralPath $metadataPath -Raw
+$metadata = $metadataJson | ConvertFrom-Json
 if (@(1, 2) -notcontains [int]$metadata.schemaVersion -or $metadata.workflowName -ne 'ai-engineering-workflow') {
     throw 'Unsupported or invalid workflow installation metadata.'
+}
+if ([int]$metadata.schemaVersion -eq 2) {
+    $metadataSchemaPath = Join-Path (Get-TemplateRoot) '.ai\workflow-installation.schema.json'
+    $metadataSchemaJson = Get-Content -LiteralPath $metadataSchemaPath -Raw
+    if (-not ($metadataJson | Test-Json -Schema $metadataSchemaJson -ErrorAction Stop)) {
+        throw 'Installation metadata does not validate against workflow-installation.schema.json.'
+    }
 }
 
 $installedMode = if ([int]$metadata.schemaVersion -eq 2) {
@@ -101,10 +109,14 @@ $stale = @($oldFiles.Keys | Where-Object { -not $newFiles.ContainsKey($_) } | So
 $gitRepository = $null
 $excludePatterns = @()
 $localPaths = @()
+$gitStatusBefore = $null
 
 if ($requestedMode -eq 'Local' -or $installedMode -eq 'local') {
     $gitRepository = Get-GitRepositoryInfo -TargetRoot $targetRoot
     Get-WorkflowExcludeBlockState -ExcludePath $gitRepository.ExcludePath | Out-Null
+    if ($requestedMode -eq 'Local' -and -not $requestedShareProjectContext) {
+        $gitStatusBefore = Get-GitStatusSnapshot -GitRepository $gitRepository
+    }
 }
 
 if ($requestedMode -eq 'Local') {
@@ -191,6 +203,17 @@ Write-InstallationMetadata `
 
 if ($requestedMode -eq 'Local') {
     Assert-LocalPathsIgnored -GitRepository $gitRepository -RelativePaths $localPaths
+    if (-not $requestedShareProjectContext) {
+        $gitStatusAfter = Get-GitStatusSnapshot -GitRepository $gitRepository
+        if ($gitStatusAfter -ne $gitStatusBefore) {
+            throw 'Local update changed the Git-visible working-tree status unexpectedly. Inspect the target before continuing.'
+        }
+    }
+}
+$writtenMetadataJson = Get-Content -LiteralPath $metadataPath -Raw
+$writtenMetadataSchema = Get-Content -LiteralPath (Join-Path (Get-TemplateRoot) '.ai\workflow-installation.schema.json') -Raw
+if (-not ($writtenMetadataJson | Test-Json -Schema $writtenMetadataSchema -ErrorAction Stop)) {
+    throw 'Updated installation metadata failed deterministic schema validation.'
 }
 Write-Host "Workflow updated to version $(Get-WorkflowVersion)."
 Write-Host "Installation mode: $requestedMode"

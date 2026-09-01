@@ -3,7 +3,7 @@ description: Create one explicitly approved Conventional Commit from an exact st
 agent: orchestrator
 ---
 
-Load `delivery-safety` and `conventional-commit`. Require the latest approved plan, fresh overall PASS gate evidence, a review with no BLOCKER or HIGH findings, and an unchanged diff within scope.
+Load `workflow-state`, `delivery-safety`, and `conventional-commit`. Require a validated persisted run in `READY_FOR_DELIVERY`, fresh overall PASS gate evidence, a review with no BLOCKER or HIGH findings, and an unchanged worktree fingerprint within scope.
 
 Propose:
 
@@ -14,4 +14,4 @@ Propose:
 
 The commit message must contain no AI-agent authorship, co-authorship, generation, or tool attribution. Wait for explicit approval of the exact file list and message. Then delegate one commit operation to `delivery`: stage only those file paths, inspect the cached diff, and use `.ai/scripts/commit-approved.ps1`.
 
-Report the resulting commit SHA and final message, then stop. Do not push or create a pull request.
+Write the resulting SHA, parent, exact paths, and final message to `.ai/runtime/commit.json`, call `RecordCommit`, report the persisted result, then stop. Do not push or create a pull request.

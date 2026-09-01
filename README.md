@@ -20,6 +20,7 @@ The workflow turns tickets, specifications, and written requirements into eviden
 - [Installed project layout](#installed-project-layout)
 - [Bootstrap](#bootstrap)
 - [Working with tickets and specifications](#working-with-tickets-and-specifications)
+- [Persisted workflow state](#persisted-workflow-state)
 - [Fast path for small changes](#fast-path-for-small-changes)
 - [Agents](#agents)
 - [Model selection](#model-selection)
@@ -32,6 +33,7 @@ The workflow turns tickets, specifications, and written requirements into eviden
 - [Safety model](#safety-model)
 - [Extending the distribution](#extending-the-distribution)
 - [Validation and release checklist](#validation-and-release-checklist)
+- [Measuring token efficiency and quality](#measuring-token-efficiency-and-quality)
 - [Troubleshooting](#troubleshooting)
 - [Current limitations](#current-limitations)
 - [OpenCode V2 compatibility](#opencode-v2-compatibility)
@@ -49,6 +51,7 @@ It provides:
 - A mandatory human approval point before production code changes.
 - Specialized orchestrator, developer, reviewer, tester, delivery, quick-fix, and quick-reviewer agents.
 - A deterministic, bounded fast path for low-risk bug fixes and small tasks.
+- Local, hash-verified run state that survives session changes and compaction.
 - Stack and architecture guidance loaded only when relevant.
 - Deterministic, exit-code-based quality gates.
 - Read-only Azure DevOps work-item retrieval.
@@ -67,6 +70,10 @@ Repository files, build manifests, test projects, lockfiles, CI/CD definitions, 
 ### Human approval before implementation
 
 Bootstrap and ticket analysis are read-only. The orchestrator must present a complete proposal or implementation plan and wait for explicit approval before configuration or production code is changed.
+
+### Approved state is persisted
+
+Conversation history is not the source of truth for execution. Requirements, approved plans, gate evidence, review evidence, correction counts, Git SHAs, and worktree fingerprints are stored under ignored `.ai/runs/` records and verified before each transition.
 
 ### Project context is selective
 
@@ -113,6 +120,10 @@ Bounded classifier + micro-plan    Scoped implementation plan
         |                               |
         | explicit approval             | explicit approval
         v                               v
+Persisted approved run state       Persisted approved run state
+        |                               |
+        | optional feature branch       | optional feature branch
+        v                               v
 Quick fix -> gates -> quick review  Developer -> gates -> tester -> reviewer
         |                               |
         | eligible final diff           | standard correction policy
@@ -122,7 +133,7 @@ Explanation + detailed PR draft
         |
         | separate approval for each operation
         v
-Feature branch -> Conventional Commit -> normal push -> draft PR
+Verified diff -> Conventional Commit -> normal push -> draft PR
         |
         v
 Manual review, merge, release, and deployment
@@ -135,6 +146,7 @@ The distribution and consumer roles are intentionally separated:
 - Local installations keep those files available on disk but invisible to normal Git status and staging in that clone.
 - `.ai/workflow-installation.json` records the installed version, installation mode, local exclusion paths, and hashes needed for later updates.
 - `.ai/project.json` is generated only after bootstrap has inspected the real consumer repository and the user has approved the proposal.
+- `.ai/runs/<run-id>/state.json` provides a resumable state machine whose canonical artifacts are hash verified and remain local.
 
 ## Repository layout
 
@@ -145,14 +157,21 @@ ai-engineering-workflow/
 ├── workflow.manifest.json
 ├── workflow.manifest.schema.json
 ├── .github/
-│   └── pull_request_template.md
+│   ├── pull_request_template.md
+│   └── workflows/validate.yml
 │
 ├── scripts/
 │   ├── Workflow.Common.ps1
 │   ├── install.ps1
 │   ├── new-project.ps1
 │   ├── update.ps1
+│   ├── summarize-evaluations.ps1
 │   └── validate.ps1
+├── tests/
+│   └── Run-Tests.ps1
+├── evaluations/
+│   ├── README.md
+│   └── benchmark.schema.json
 │
 ├── presets/
 │   ├── projects/
@@ -184,8 +203,11 @@ ai-engineering-workflow/
     │   ├── project-rules.md
     │   ├── bootstrap-input.schema.json
     │   ├── workflow-installation.schema.json
+    │   ├── workflow-run.schema.json
     │   └── scripts/
     │       ├── fast-path-check.ps1
+    │       ├── validate-project.ps1
+    │       ├── workflow-state.ps1
     │       ├── delivery-check.ps1
     │       ├── create-branch.ps1
     │       ├── validate-commit-message.ps1
@@ -517,7 +539,7 @@ consumer-repository/
 ├── AGENTS.md
 ├── opencode.json
 ├── .ai/
-│   ├── .gitignore                         # ignores the local PR draft
+│   ├── .gitignore                         # ignores runtime, run state, and PR draft
 │   ├── pull-request-template.md           # canonical consumer PR structure
 │   ├── scripts/                           # guarded delivery operations
 │   ├── project-rules.md
@@ -525,9 +547,12 @@ consumer-repository/
 │   ├── project.schema.json
 │   ├── bootstrap-input.schema.json
 │   ├── workflow-installation.schema.json
+│   ├── workflow-run.schema.json           # persisted run-state contract
 │   ├── workflow-installation.json       # generated by installation
 │   ├── bootstrap-input.json              # generated for new projects
 │   ├── pr-draft.md                        # ignored; written after PR approval
+│   ├── runtime/                           # ignored transition inputs
+│   ├── runs/<run-id>/                     # ignored canonical evidence and state
 │   └── project.json                      # generated after approved bootstrap
 └── .opencode/
     ├── agents/
@@ -549,7 +574,11 @@ For an existing repository installed with `install.ps1`, `.ai/bootstrap-input.js
 - `.ai/bootstrap-input.json`: project-generator intent; it is not authoritative evidence.
 - `.ai/pull-request-template.md`: detailed structure required by `/pr` and `/pr-create`.
 - `.ai/pr-draft.md`: ignored local copy of the exact approved PR body.
-- `.ai/scripts/`: guarded, deterministic wrappers for delivery checks and approved Git/GitHub mutations.
+- `.ai/runtime/`: ignored temporary inputs written before deterministic state transitions.
+- `.ai/runs/<run-id>/`: canonical requirement, approved plan, gate, review, delivery evidence, hashes, SHAs, and status.
+- `.ai/scripts/validate-project.ps1`: deterministic JSON Schema, module-path, context-skill, and command validation.
+- `.ai/scripts/workflow-state.ps1`: legal run transitions, artifact hashing, HEAD checks, correction limits, and worktree fingerprints.
+- `.ai/scripts/`: deterministic classifiers plus guarded delivery checks and approved Git/GitHub mutations.
 - `.opencode/agents/`: specialized agent definitions.
 - `.opencode/commands/`: slash-command prompt templates.
 - `.opencode/skills/`: reusable, on-demand workflow, stack, and architecture instructions.
@@ -599,7 +628,7 @@ The proposal includes:
 - Proposed `.ai/project-rules.md` updates.
 - A summary of the exploration ledger.
 
-No configuration is written during the proposal. After explicit approval, bootstrap writes only the approved `.ai/project.json` and `.ai/project-rules.md`, validates them again, and reports that `/ticket` is ready.
+No configuration is written during the proposal. After explicit approval, bootstrap writes only the approved `.ai/project.json` and `.ai/project-rules.md`, runs `.ai/scripts/validate-project.ps1`, and reports that `/ticket` is ready only after `PROJECT_VALID`.
 
 ## Working with tickets and specifications
 
@@ -624,20 +653,57 @@ Examples:
 /ticket 18427
 ```
 
+## Persisted workflow state
+
+Ticket and fast-path commands create an ignored local run under `.ai/runs/<run-id>/`. This is the execution source of truth; the conversation remains the human interface but is not the only record of approval.
+
+```text
+.ai/runs/ticket-18427/
+├── state.json
+├── requirement.md
+├── plan.md
+├── gates.json
+├── review.md
+├── commit.json
+├── publish.json
+└── pull-request.json
+```
+
+`state.json` records the workflow path, legal status, base/current Git SHA, post-gate worktree fingerprint, correction allowance, timestamps, and SHA-256 for every canonical artifact. Agents write candidate inputs under `.ai/runtime/`; `.ai/scripts/workflow-state.ps1` copies, hashes, validates, and advances them. Canonical run files and `state.json` must never be edited directly.
+
+Legal standard transitions are:
+
+```text
+PLANNING -> PLAN_APPROVED -> IMPLEMENTING
+    -> GATES_PASSED -> READY_FOR_DELIVERY
+    -> COMMITTED -> PUBLISHED -> DRAFT_PR_CREATED
+```
+
+Gate or review failure can enter one approved correction and return to `IMPLEMENTING` until the configured limit is reached. Any invalidated route enters `ESCALATED`. The fast path allows exactly one correction; the standard path uses `review.maxIterations`, capped at three.
+
+Resume or audit a run with:
+
+```text
+/run-status ticket-18427
+```
+
+`Validate` checks the run schema and every artifact hash. Gate and review transitions also require an unchanged HEAD. Review requires the actual worktree fingerprint to match the one recorded after gates. After commit, the state script reconstructs the committed patch and refuses it unless it matches the exact gate-reviewed fingerprint.
+
 ### Recommended lifecycle
 
 1. Run `/ticket <requirement>`.
 2. Review the interpreted acceptance criteria, scope, affected modules, risks, quality commands, and expected diff budget.
 3. Answer unresolved questions and explicitly approve the final plan.
-4. Run `/implement`.
-5. Run `/test` when acceptance scenarios or additional test work are needed.
-6. Run `/review` for the independent read-only review.
-7. If BLOCKER or HIGH findings exist, approve a correction cycle and repeat gates and review. The configured maximum is three cycles.
-8. Run `/explain` for a human-oriented implementation walkthrough.
-9. Run `/pr` to draft the title and complete canonical PR template.
-10. Run `/delivery-check` and resolve every readiness blocker.
-11. Optionally run `/branch`, `/commit`, `/publish`, and `/pr-create` in order. Review and explicitly approve each exact operation separately.
-12. Review the draft PR and perform readiness changes, reviewer assignment, merge, release, and deployment manually.
+4. Optionally run `/branch` while the tree is clean and the persisted run is `PLAN_APPROVED`.
+5. Run `/implement`.
+6. Run `/test` when acceptance scenarios or additional test work are needed.
+7. Run `/review` for the independent shell-free review.
+8. If BLOCKER or HIGH findings exist, approve a correction cycle and repeat gates and review. The persisted maximum is enforced.
+9. Run `/explain` for a human-oriented implementation walkthrough.
+10. Run `/pr` to draft the title and complete canonical PR template.
+11. Run `/delivery-check` and resolve every readiness blocker.
+12. Optionally run `/commit`, `/publish`, and `/pr-create` in order. Review and explicitly approve each exact operation separately.
+13. Review the draft PR and perform readiness changes, reviewer assignment, merge, release, and deployment manually.
 
 ### Slash commands
 
@@ -647,13 +713,14 @@ Examples:
 | `/ticket` | Analyze a ticket, specification, or requirement and produce an approvable plan. | No |
 | `/quick-fix` | Classify and implement a well-understood, low-risk bug fix through the bounded fast path. | Yes, after micro-plan approval |
 | `/small-task` | Classify and implement a narrow documentation, test, or local configuration change through the bounded fast path. | Yes, after micro-plan approval |
-| `/implement` | Delegate the latest explicitly approved plan to the developer. | Yes, within approved scope |
+| `/run-status` | Validate and display a persisted run, hashes, corrections, and next legal action. | No |
+| `/implement` | Delegate an exact persisted plan in `PLAN_APPROVED` to the developer. | Yes, within approved scope |
 | `/test` | Derive acceptance scenarios, add tests only in recognized test paths, and run quality gates. | Tests only |
-| `/review` | Delegate an independent review against ticket, plan, diff, and gate evidence. | No |
+| `/review` | Build an exact evidence packet and delegate a shell-free independent review. | No |
 | `/explain` | Explain behavior, design choices, risks, deviations, and review order. | No |
 | `/pr` | Draft a title and detailed body using `.ai/pull-request-template.md`. | No |
 | `/delivery-check` | Combine Git state, gates, review, scope, and diff evidence into a delivery-readiness verdict. | No |
-| `/branch` | Propose and create one approved local feature branch. | Git metadata only |
+| `/branch` | Create one approved feature branch after plan approval and before implementation. | Git metadata only |
 | `/commit` | Stage exact approved paths and create one validated Conventional Commit. | Git index and local history |
 | `/publish` | Push the current feature branch normally to an explicitly approved remote. | Remote feature branch |
 | `/pr-create` | Create one explicitly approved draft PR from the published branch. | Draft PR only |
@@ -679,7 +746,7 @@ A task is eligible only when all of these statements are true:
 - It does not involve migrations, security-sensitive behavior, infrastructure, data integrity, concurrency, cross-module coordination, or generated code.
 - At most one correction cycle is needed.
 
-The repository can adopt stricter numeric limits through `fastPath` in `.ai/project.json`, but it cannot raise the schema ceilings. The deterministic evaluator is `.ai/scripts/fast-path-check.ps1`. Agents pass the observed facts to it before approval with `-Phase Estimate` and again against the final diff with `-Phase Actual`. Exit code `0` and `FAST_PATH_ELIGIBLE` permit the fast path; exit code `3` and `ESCALATE_STANDARD` require the standard workflow.
+The repository can adopt stricter numeric limits through `fastPath` in `.ai/project.json`, but it cannot raise the schema ceilings. The evaluator is `.ai/scripts/fast-path-check.ps1`. Estimate mode evaluates bounded declared evidence. Actual mode reads project limits, derives changed files and added-plus-deleted lines from Git, maps paths to configured modules, includes untracked text files, rejects unmeasurable binary changes, and conservatively recognizes dependency, migration, CI/infrastructure, generated, security, and public-contract paths. Exit code `0` and `FAST_PATH_ELIGIBLE` permit the fast path; exit code `3` and `ESCALATE_STANDARD` require the standard workflow.
 
 Example estimate:
 
@@ -708,6 +775,8 @@ pwsh -NoProfile -File .ai/scripts/fast-path-check.ps1 `
 
 Fast-path approval authorizes only its micro-plan. It does not approve branch creation, commit, push, PR creation, merge, release, or deployment. The same separate delivery approvals and Conventional Commit requirements apply.
 
+The quick reviewer has neither edit nor shell permissions. The quick-fix agent constructs the exact diff packet after gates and passes only persisted requirement, plan, classifier, diff, and gate evidence.
+
 ### Automatic escalation
 
 Do not force a task to remain small. Use `/ticket` and the standard lifecycle when the classifier rejects the estimate, evidence invalidates the root cause, the actual diff exceeds a limit, an excluded risk appears, a configured quality gate fails for a reason that expands scope, or the quick review cannot be resolved in one correction. Existing evidence should be summarized for the standard orchestrator so work is not rediscovered unnecessarily.
@@ -718,9 +787,9 @@ Do not force a task to remain small. Use `/ticket` and the standard lifecycle wh
 | --- | --- | --- | --- |
 | `orchestrator` | Primary | Loads project context, analyzes requirements, plans work, enforces approval, and coordinates other agents. | Cannot implement production code directly. During bootstrap it may edit only approved `.ai/project.json` and `.ai/project-rules.md`. |
 | `quick-fix` | Primary | Classifies, plans, implements, verifies, and closes bounded low-risk changes with minimal context. | Must reclassify the actual diff, permits one correction only, and delegates solely to `quick-reviewer`. |
-| `quick-reviewer` | Subagent | Performs a focused independent review of a fast-path diff and its evidence. | Read-only, eight-step budget, and no arbitrary shell access. |
+| `quick-reviewer` | Subagent | Performs a focused independent review of a supplied fast-path diff packet. | No edits, no shell, eight-step budget, and no subagents. |
 | `developer` | Subagent | Implements the explicitly approved plan using the smallest correct diff and project conventions. | Stops with `PLAN INVALIDATED` when evidence contradicts the plan; cannot launch subagents. |
-| `reviewer` | Subagent | Reviews correctness, security, architecture, regressions, tests, and scope independently. | Read-only; arbitrary shell and all file edits are denied. Only safe Git inspection commands are allowed. |
+| `reviewer` | Subagent | Reviews correctness, security, architecture, regressions, tests, and scope independently from a supplied evidence packet. | No edits, no shell, and no subagents. It cannot rediscover or mutate repository state. |
 | `tester` | Subagent | Converts acceptance criteria into scenarios and adds the smallest valuable tests. | May edit recognized test paths only; never production code. Returns `TESTABILITY ISSUE` when production changes are required. |
 | `delivery` | Subagent | Revalidates delivery state and performs one approved branch, commit, push, or draft PR operation through managed scripts. | Cannot edit files or use arbitrary shell; merge, force, protected branches, tags, releases, deployments, and secret/cloud mutations remain denied. |
 
@@ -824,6 +893,7 @@ Skills are discovered from `.opencode/skills/` and loaded on demand.
 - `project-context`: validates `.ai/project.json`, reads project rules, resolves affected modules, and loads only their context skills.
 - `ticket-analysis`: converts requirements into traceable, testable acceptance criteria.
 - `implementation-plan`: produces the required human-approvable plan.
+- `workflow-state`: persists approved artifacts and enforces legal resumable transitions across sessions.
 - `fast-path`: classifies low-risk work, enforces minimal context and diff budgets, and defines the one-correction escalation policy.
 - `quality-gate`: runs exact configured commands and reports exit-based results.
 - `code-review`: defines structured independent review and severity rules.
@@ -854,7 +924,7 @@ Architecture skills preserve boundaries and evolution rules for the selected mod
 
 ## Project configuration
 
-`.ai/project.json` is the machine-readable source of truth after bootstrap. It must validate against `.ai/project.schema.json`.
+`.ai/project.json` is the machine-readable source of truth after bootstrap. It must validate against `.ai/project.schema.json`; `.ai/scripts/validate-project.ps1` performs that JSON Schema check plus repository-relative module-path, directory, context-skill, duplicate-ID, and multiline-command checks.
 
 A simplified example:
 
@@ -916,7 +986,7 @@ See [`template/.ai/project.example.json`](template/.ai/project.example.json) for
 | Field | Meaning |
 | --- | --- |
 | `id` | Stable lowercase kebab-case module identifier. |
-| `path` | Working directory relative to the repository root. |
+| `path` | Existing working directory relative to the repository root; absolute and escaping paths are rejected. |
 | `languages` | Languages supported by repository evidence. |
 | `frameworks` | Frameworks supported by manifests or source evidence. |
 | `architectures` | Confirmed or explicitly approved architecture identifiers. |
@@ -924,6 +994,12 @@ See [`template/.ai/project.example.json`](template/.ai/project.example.json) for
 | `quality` | Ordered command arrays for every deterministic gate phase. |
 
 Every quality phase is required in the JSON shape, even when its command array is empty.
+
+Run the validator manually after a reviewed project-configuration change:
+
+```powershell
+pwsh -NoProfile -File .ai/scripts/validate-project.ps1
+```
 
 ### Review policy
 
@@ -978,9 +1054,11 @@ The gate stops a module after its first failure unless the user explicitly reque
 
 The agent may diagnose a failure, but it must not silently change commands, append flags, skip required checks, weaken assertions, delete failing tests, or suppress warnings merely to produce a passing result.
 
+Before review, factual gate output is persisted and hashed in the active run. The subsequent review transition verifies that HEAD and the worktree fingerprint have not changed since the gate was recorded.
+
 ## Gated delivery workflow
 
-Delivery is opt-in and separated from implementation. The `delivery` agent is the only agent that can request the narrow permissions needed for branch creation, staging, commit, push, or draft PR creation. It operates through managed scripts and stops after one approved mutation.
+Delivery is opt-in and separated from implementation. The `delivery` agent is the only agent that can request the narrow permissions needed for branch creation, staging, commit, push, or draft PR creation. It operates through managed scripts and stops after one approved mutation. A branch is created after plan approval and before implementation; commit, push, and PR creation use the persisted run after it reaches `READY_FOR_DELIVERY`.
 
 ### Readiness check
 
@@ -999,6 +1077,7 @@ The check combines:
 - actual diff and diff-budget status
 - deterministic gate evidence
 - independent review verdict and unresolved findings
+- persisted run status, artifact hashes, base/current SHA, and worktree fingerprint
 
 It reports `READY FOR DELIVERY` only when every required input is current. A missing plan, stale gate result, BLOCKER/HIGH finding, changed SHA, unrelated file, protected environment file, or scope mismatch produces `DELIVERY NOT READY`.
 
@@ -1008,7 +1087,7 @@ It reports `READY FOR DELIVERY` only when every required input is current. A mis
 /branch
 ```
 
-The command proposes one branch name and waits for approval. The managed script requires a clean working tree, validates the ref name, refuses an existing branch, and blocks shared/protected names including `main`, `master`, `develop`, `development`, `trunk`, and `release`.
+The command proposes one branch name and waits for approval. It requires one validated `PLAN_APPROVED` run and a clean working tree. The managed script validates the ref name, refuses an existing branch, and blocks shared/protected names including `main`, `master`, `develop`, `development`, `trunk`, and `release`.
 
 Branch approval does not authorize a commit.
 
@@ -1038,6 +1117,7 @@ Commit safeguards:
 - Reject staged `.env` and `.env.*` files other than `.env.example`.
 - Validate the exact message before and after commit creation.
 - Preserve the human Git identity already configured in the repository.
+- Record the resulting commit only when its patch exactly matches the gate-reviewed worktree fingerprint.
 - Stop after reporting the commit SHA; do not push automatically.
 
 ### Publish a feature branch
@@ -1051,6 +1131,8 @@ Before approval, the command displays the remote name and URL, branch, HEAD SHA,
 It never uses force, force-with-lease, tags, ref deletion, or a protected/shared branch. If the normal push is rejected because the remote changed, the workflow stops and reports the conflict instead of retrying with a more permissive command.
 
 Push approval does not authorize PR creation.
+
+The approved push result is persisted before draft-PR creation can continue.
 
 ### Create a draft pull request
 
@@ -1069,6 +1151,8 @@ Then create it only after reviewing the exact base, head, title, and body:
 After approval, the orchestrator writes the approved body to the ignored `.ai/pr-draft.md`. The managed script requires a clean working tree, a published feature branch with an upstream, and no existing open PR for that branch. It calls GitHub CLI with explicit base and head and always creates a draft.
 
 The creation flow does not request reviewers, assign users, apply labels, add comments, include issue-closing keywords without approval, mark the PR ready, enable auto-merge, or merge it.
+
+The draft PR URL, base, head, and title are persisted as the terminal workflow record. A draft PR remains manually reviewed and manually merged.
 
 ### Operations that remain manual
 
@@ -1155,17 +1239,17 @@ The integration never requests or stores credentials and never adds comments, up
 The installed `opencode.json`:
 
 - Allows normal repository reads and edits for agents that are permitted to edit.
-- Denies reading or editing `.env` and `.env.*` files.
+- Denies reading or editing `.env` and `.env.*` files, plus common credential and private-key file patterns.
 - Allows reading `.env.example` and asks before editing it.
 - Denies access outside the repository.
 - Allows skills.
 - Requires approval for shell commands by default.
-- Allows narrowly scoped, read-only Git and GitHub PR inspection.
+- Requires approval for Git diff, log, and show commands because their output can be redirected by the underlying Git CLI.
 - Denies direct staging, branch mutation, commit, push, PR mutation, merge, rebase, reset, clean, tag, release, secret, variable, and workflow-dispatch commands.
 - Denies direct invocation of managed mutation scripts for every agent except `delivery`.
 - Denies common infrastructure mutations such as Terraform apply/destroy, Kubernetes apply/delete, and Azure deployments.
 
-Agent-specific permissions further restrict the orchestrator, reviewer, tester, and delivery agent. The delivery agent's later, narrow `ask` rules override only the exact managed operations and still require a permission decision.
+Agent-specific permissions further restrict the orchestrator, reviewer, tester, and delivery agent. Both review agents deny every shell command and receive an immutable evidence packet rather than rediscovering the repository. The delivery agent's later, narrow `ask` rules override only the exact managed operations and still require a permission decision.
 
 ### Human gates
 
@@ -1187,6 +1271,8 @@ Each delivery approval is single-purpose and state-bound. Commit, push, and draf
 ### Scope control
 
 Plans must identify affected modules and files, non-goals, test scenarios, risks, exact quality commands, and an expected file/line budget. If repository evidence later invalidates the plan, the developer must stop with `PLAN INVALIDATED` rather than inventing a new design.
+
+`/ai-bootstrap` and installation/update tooling validate `.ai/project.json` against its JSON schema before accepting it. The validator also rejects duplicate module identifiers, missing referenced skills, multiline quality commands, absolute module paths, and paths that escape the repository.
 
 ## Extending the distribution
 
@@ -1332,8 +1418,10 @@ Before releasing a change:
 - [ ] OpenCode discovers `orchestrator`, `developer`, `reviewer`, `tester`, and `delivery` in a consumer repository.
 - [ ] OpenCode discovers `quick-fix`, `quick-reviewer`, `/quick-fix`, and `/small-task` in a consumer repository.
 - [ ] The reviewer remains effectively read-only.
+- [ ] The reviewer and quick reviewer deny shell access and receive only the evidence packet.
 - [ ] The quick reviewer remains read-only and the quick-fix agent cannot delegate to standard implementation agents.
 - [ ] The fast-path classifier accepts a compliant estimate and actual diff, and returns exit code 3 for every excluded risk and exceeded limit.
+- [ ] Actual fast-path scope is derived from the Git diff and untracked files, not agent-supplied counts.
 - [ ] Fast-path work escalates after one correction or whenever the final diff loses eligibility.
 - [ ] Non-delivery agents cannot invoke managed mutation scripts.
 - [ ] The commit-message validator accepts valid Conventional Commits and rejects non-conventional or AI-attributed messages.
@@ -1341,8 +1429,24 @@ Before releasing a change:
 - [ ] Publishing uses a normal feature-branch push and has no force fallback.
 - [ ] Draft PR creation requires explicit base/head, an upstream branch, and the canonical template.
 - [ ] The repository and consumer pull-request templates have identical hashes.
+- [ ] `tests/Run-Tests.ps1` passes, including state transitions, schema rejection, Local-install invisibility, fast-path derivation, commit-fingerprint verification, and updater conflict detection.
+- [ ] The CI workflow runs the distribution validation and test suite on a clean Windows runner.
 - [ ] The distribution root is not detected as a consumer configuration.
 - [ ] No secrets, generated credentials, or local `.env` files are included.
+
+## Measuring token efficiency and quality
+
+The workflow is designed to reduce avoidable context and handoff cost, not to promise a fixed provider bill. It does that by selecting only relevant project/stack/architecture skills, using a bounded fast path for low-risk work, giving reviewers a narrow evidence packet, and limiting correction cycles. Use the evaluation contract to measure whether those controls work for your own models and repositories.
+
+Record one completed task per JSON document that validates against [`evaluations/benchmark.schema.json`](evaluations/benchmark.schema.json). Include the actual workflow path, provider-reported or manually captured input/output tokens, cost if available, elapsed time, correction count, pass/fail result, and escaped defect count. Do not invent measurements or compare tasks with materially different scope as if they were equivalent.
+
+Summarize a directory of recorded benchmarks with:
+
+```powershell
+pwsh -NoProfile -File scripts/summarize-evaluations.ps1 -Path .\evaluations\results
+```
+
+The report groups manual, standard, and fast-path runs, totals usage and outcomes, and calculates fast-path savings only when both fast-path and standard observations exist. [`evaluations/README.md`](evaluations/README.md) defines the field meanings and a safe collection procedure.
 
 ## Troubleshooting
 
@@ -1401,6 +1505,20 @@ You launched `/ai-bootstrap` in the workflow distribution repository. Install or
 
 Bootstrap found no source/build evidence that can support a valid module. Add or generate the application first. This is expected for the `empty` preset before application files exist.
 
+### `PROJECT_INVALID` or `PROJECT_VALID` is not produced
+
+Run the deterministic validator directly from the consumer repository:
+
+```powershell
+pwsh -NoProfile -File .ai/scripts/validate-project.ps1
+```
+
+Correct the reported schema, module-path, skill, or quality-command problem. Do not edit a canonical run to bypass the validator.
+
+### A workflow-state transition or fingerprint check fails
+
+Use `/run-status <run-id>` to identify the current legal state and validate artifact hashes. A changed `HEAD`, changed post-gate diff, or a commit whose patch differs from the reviewed gate fingerprint is an intentional stop: create a new plan or return through an explicitly approved correction cycle.
+
 ### `ESCALATE_STANDARD`
 
 The deterministic fast-path classifier found an exceeded limit, missing prerequisite, or excluded risk. This is a routing verdict, not a failed implementation. Preserve the requirement, evidence, proposed files, and verification commands, then continue with `/ticket` and the standard workflow.
@@ -1450,8 +1568,8 @@ The workflow reports retrieval gaps and does not fall back to a write-capable op
 - File installation and updates perform full conflict preflight, but are not transactional against unexpected filesystem failures.
 - Local installations are intentionally clone-specific. A new clone must install the workflow again.
 - Local mode depends on `.git/info/exclude`; it cannot hide workflow paths that are already tracked.
-- Fast-path classification is deterministic for the facts supplied to the script, but the agent remains responsible for deriving those facts honestly from repository and task evidence.
-- The workflow reduces likely token usage through context and handoff limits but does not collect provider token telemetry or guarantee a fixed token cost.
+- Actual fast-path scope is derived from Git changes and untracked files; task-level semantic risks can still require agent judgment and conservative escalation.
+- Evaluation collection is intentionally manual and provider-neutral; the workflow cannot automatically retrieve token or cost telemetry from every OpenCode provider.
 - OpenCode V2 is evolving; validate the distribution again after upgrading the CLI.
 
 ## OpenCode V2 compatibility

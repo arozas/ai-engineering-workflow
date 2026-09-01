@@ -11,7 +11,7 @@ Compose project context without flooding the session or guessing conventions.
 ## Workflow
 
 1. Read `.ai/project.json`. If it does not exist, stop and recommend `/ai-bootstrap`.
-2. Validate its shape against `.ai/project.schema.json`. Report invalid or missing fields; do not silently repair them.
+2. Run `pwsh -NoProfile -File .ai/scripts/validate-project.ps1`. Continue only when it returns `PROJECT_VALID`; report invalid or missing fields and do not silently repair them.
 3. Read `.ai/project-rules.md` and any `AGENTS.md` that governs the affected paths.
 4. Determine affected modules from paths and ticket evidence. If ambiguous, state the ambiguity.
 5. For each affected module, load exactly the skill IDs in `contextSkills`. Do not load every stack and architecture skill.

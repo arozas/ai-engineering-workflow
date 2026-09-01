@@ -6,7 +6,7 @@ compatibility: opencode-v2 git github-cli powershell
 
 ## Preconditions
 
-Before proposing a delivery mutation, require:
+Before proposing a commit, push, or draft PR mutation, require:
 
 1. An explicitly approved implementation plan.
 2. Actual changes within the approved scope and diff budget.
@@ -16,6 +16,8 @@ Before proposing a delivery mutation, require:
 6. No protected environment files, secrets, unrelated files, or unapproved generated artifacts.
 
 If any precondition is missing, report `DELIVERY NOT READY` and do not mutate Git or GitHub state.
+
+Branch creation is a preparation step, not post-implementation delivery. It requires a persisted `PLAN_APPROVED` run, the recorded base SHA, and a completely clean working tree. Create the feature branch before `BeginImplementation`; it does not require gates or review because no implementation exists yet.
 
 ## Approval contract
 

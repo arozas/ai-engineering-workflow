@@ -78,7 +78,11 @@
       "required": ["id", "path", "languages", "frameworks", "architectures", "contextSkills", "quality"],
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
-        "path": { "type": "string", "minLength": 1 },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$)).+$"
+        },
         "languages": { "$ref": "#/$defs/stringList" },
         "frameworks": { "$ref": "#/$defs/stringList" },
         "architectures": { "$ref": "#/$defs/stringList" },

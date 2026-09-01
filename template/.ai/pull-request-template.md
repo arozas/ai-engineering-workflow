@@ -45,6 +45,21 @@ select Standard workflow and explain the escalation. Fast-path work allows at
 most one correction cycle.
 -->
 
+## Persisted workflow evidence
+
+- Run ID:
+- Final run status:
+- Base SHA:
+- Current or committed SHA:
+- Quality-gate fingerprint:
+- Requirement, plan, gate, and review artifact hashes:
+
+<!--
+Copy these values from `.ai/runs/<run-id>/state.json`. The committed patch must
+match the gate fingerprint. Use "Not applicable" only when this PR was not
+produced through this workflow.
+-->
+
 ## Problem and current behavior
 
 <!--

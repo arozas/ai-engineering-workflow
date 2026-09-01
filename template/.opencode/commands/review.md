@@ -3,8 +3,8 @@ description: Run an independent read-only review against the ticket and approved
 agent: orchestrator
 ---
 
-Delegate an independent review of the current changes to `reviewer`.
+Load `workflow-state`, resolve and validate the persisted run in `GATES_PASSED`, and construct the exact diff packet before delegating an independent review to `reviewer`.
 
-Provide the original ticket or requirement, the explicitly approved plan, the current diff, affected module context, and the latest deterministic quality-gate evidence. Require the structured output defined by `code-review`.
+Provide only the persisted requirement, approved plan, exact diff packet, affected module context, and persisted gate evidence. Require the structured output defined by `code-review`. The reviewer cannot run shell commands or edit files.
 
-Do not allow the reviewer to edit. If the verdict is FAIL, summarize the findings and ask before starting a correction cycle unless the user already authorized the full workflow.
+Write the returned result to `.ai/runtime/review.md` and call `RecordReview`. If the verdict is FAIL, summarize findings and ask before calling `BeginCorrection` unless the user already authorized the full workflow.

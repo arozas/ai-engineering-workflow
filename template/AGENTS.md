@@ -29,14 +29,14 @@ Do not guess missing project conventions. Report uncertainty and ask for approva
 1. Understand the ticket or request before changing code.
 2. Load `project-context` and only the stack and architecture skills selected by the affected module.
 3. Explore the repository and cite evidence for the proposed impact.
-4. Produce an implementation and test plan.
-5. Wait for explicit human approval before modifying production code.
-6. Implement only the approved scope.
-7. Run the exact deterministic quality commands from `.ai/project.json`.
-8. Obtain an independent read-only review.
-9. Correct BLOCKER and HIGH findings, then re-run the gate and review. Stop after the configured maximum of three standard-workflow review cycles. Fast-path work always stops after one correction cycle.
+4. Start a persisted workflow run and produce an implementation and test plan.
+5. Wait for explicit human approval, then record `PLAN_APPROVED` before modifying production code.
+6. If a feature branch is needed, create it while the tree is clean and before implementation.
+7. Implement only the approved scope and record the deterministic gate evidence.
+8. Obtain an independent read-only review from the supplied evidence packet; the reviewer has no shell access.
+9. Record each correction cycle, then re-run the gate and review. Stop after the configured maximum of three standard-workflow review cycles. Fast-path work always stops after one correction cycle.
 10. Present an explanation and PR description for human review.
-11. Only when the user explicitly requests delivery, use the dedicated `delivery` agent for one approved branch, commit, normal feature-branch push, or draft PR operation at a time.
+11. Only when the user explicitly requests delivery, use the dedicated `delivery` agent for one approved branch, commit, normal feature-branch push, or draft PR operation at a time. Record the result in the same persisted run.
 
 ## Engineering rules
 
@@ -57,10 +57,10 @@ LLM judgment never overrides command results. A gate passes only when every conf
 
 ## Review policy
 
-Review findings use `BLOCKER`, `HIGH`, `MEDIUM`, `LOW`, or `NIT` and include file, line, category, evidence, impact, and recommended fix. Any BLOCKER or HIGH finding makes the verdict FAIL. The reviewer never edits files.
+Review findings use `BLOCKER`, `HIGH`, `MEDIUM`, `LOW`, or `NIT` and include file, line, category, evidence, impact, and recommended fix. Any BLOCKER or HIGH finding makes the verdict FAIL. The reviewer never edits files or executes shell commands; it assesses only the supplied evidence packet.
 
 ## Delivery and safety boundary
 
 All agents except `delivery` must never create branches, stage files, commit, push, or create pull requests. This includes `quick-fix` and `quick-reviewer`. The `delivery` agent may perform exactly one explicitly approved operation through the managed `.ai/scripts/` safeguards: create a local feature branch, create one Conventional Commit from exact staged files, push the current feature branch normally, or create one draft pull request.
 
-Each operation requires current PASS gate evidence, a review without BLOCKER or HIGH findings, an unchanged delivery check, and a new one-time human approval. Approval for one operation never authorizes the next. Never use force or force-with-lease, rewrite history, push tags, delete refs, update protected/shared branches, mark a PR ready, request reviewers, merge, release, deploy, mutate cloud infrastructure, or read/change secrets.
+Each operation requires current persisted PASS gate evidence, a persisted review without BLOCKER or HIGH findings, an unchanged delivery check, and a new one-time human approval. A commit must reproduce the exact reviewed gate fingerprint. Approval for one operation never authorizes the next. Never use force or force-with-lease, rewrite history, push tags, delete refs, update protected/shared branches, mark a PR ready, request reviewers, merge, release, deploy, mutate cloud infrastructure, or read/change secrets.
