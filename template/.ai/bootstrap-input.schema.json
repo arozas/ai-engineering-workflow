@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "User-declared bootstrap intent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "projectName", "projectPreset", "requestedStacks", "requestedArchitectures", "createdAtUtc"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "projectName": { "type": "string", "minLength": 1 },
+    "projectPreset": { "type": "string", "minLength": 1 },
+    "requestedStacks": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "requestedArchitectures": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "createdAtUtc": { "type": "string", "format": "date-time" }
+  }
+}

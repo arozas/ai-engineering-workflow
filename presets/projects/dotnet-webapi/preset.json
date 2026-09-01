@@ -1,0 +1,13 @@
+{
+  "id": "dotnet-webapi",
+  "description": "Create an ASP.NET Core Web API from the installed .NET SDK template",
+  "stacks": ["dotnet"],
+  "networkRequired": false,
+  "commands": [
+    {
+      "executable": "dotnet",
+      "arguments": ["new", "webapi", "--name", "{{name}}", "--output", "{{target}}", "--no-restore"],
+      "workingDirectory": "{{parent}}"
+    }
+  ]
+}

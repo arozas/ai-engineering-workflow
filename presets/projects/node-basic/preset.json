@@ -1,0 +1,7 @@
+{
+  "id": "node-basic",
+  "description": "Create a dependency-free Node.js ES module with native tests",
+  "stacks": ["node"],
+  "networkRequired": false,
+  "commands": []
+}

@@ -1,0 +1,53 @@
+{
+  "$schema": "./project.schema.json",
+  "version": 1,
+  "name": "example-monorepo",
+  "review": {
+    "maxIterations": 3,
+    "diffBudget": {
+      "filesMultiplier": 2,
+      "linesMultiplier": 3
+    }
+  },
+  "modules": [
+    {
+      "id": "backend",
+      "path": "src/backend",
+      "languages": ["csharp"],
+      "frameworks": ["aspnetcore"],
+      "architectures": ["clean-architecture"],
+      "contextSkills": ["stack-dotnet", "architecture-clean"],
+      "quality": {
+        "restore": ["dotnet restore"],
+        "build": ["dotnet build --no-restore"],
+        "lint": ["dotnet format --verify-no-changes"],
+        "typecheck": [],
+        "test": ["dotnet test --no-build"],
+        "e2e": []
+      }
+    },
+    {
+      "id": "frontend",
+      "path": "src/frontend",
+      "languages": ["typescript"],
+      "frameworks": ["react"],
+      "architectures": ["vertical-slice"],
+      "contextSkills": ["stack-node", "stack-react", "architecture-vertical-slice"],
+      "quality": {
+        "restore": ["npm ci"],
+        "build": ["npm run build"],
+        "lint": ["npm run lint"],
+        "typecheck": ["npm run typecheck"],
+        "test": ["npm test -- --run"],
+        "e2e": ["npm run e2e"]
+      }
+    }
+  ],
+  "integrations": {
+    "workItems": {
+      "provider": "azure-devops",
+      "organization": "https://dev.azure.com/ORGANIZATION",
+      "project": "PROJECT"
+    }
+  }
+}

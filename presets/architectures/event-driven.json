@@ -1,0 +1,5 @@
+{
+  "id": "event-driven",
+  "contextSkills": ["architecture-event-driven"],
+  "description": "Event-driven systems and integration contracts"
+}

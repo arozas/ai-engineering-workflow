@@ -1,0 +1,16 @@
+{
+  "$schema": "./workflow.manifest.schema.json",
+  "name": "ai-engineering-workflow",
+  "version": "1.0.0",
+  "templatePath": "template",
+  "installationMetadata": ".ai/workflow-installation.json",
+  "scripts": {
+    "install": "scripts/install.ps1",
+    "newProject": "scripts/new-project.ps1",
+    "update": "scripts/update.ps1",
+    "validate": "scripts/validate.ps1"
+  },
+  "projectPresetsPath": "presets/projects",
+  "stackPresetsPath": "presets/stacks",
+  "architecturePresetsPath": "presets/architectures"
+}

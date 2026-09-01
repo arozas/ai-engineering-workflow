@@ -1,0 +1,7 @@
+{
+  "id": "empty",
+  "description": "Create an empty repository with only the AI engineering workflow",
+  "stacks": [],
+  "networkRequired": false,
+  "commands": []
+}

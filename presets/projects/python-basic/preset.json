@@ -1,0 +1,7 @@
+{
+  "id": "python-basic",
+  "description": "Create a minimal Python package with standard-library unit tests",
+  "stacks": ["python"],
+  "networkRequired": false,
+  "commands": []
+}

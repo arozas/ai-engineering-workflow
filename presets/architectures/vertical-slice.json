@@ -1,0 +1,5 @@
+{
+  "id": "vertical-slice",
+  "contextSkills": ["architecture-vertical-slice"],
+  "description": "Feature-oriented vertical slices"
+}

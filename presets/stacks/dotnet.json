@@ -1,0 +1,5 @@
+{
+  "id": "dotnet",
+  "contextSkills": ["stack-dotnet"],
+  "description": ".NET and ASP.NET Core projects"
+}

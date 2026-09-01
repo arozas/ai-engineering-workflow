@@ -1,0 +1,21 @@
+---
+name: implementation-plan
+description: Produce a human-approvable implementation plan grounded in ticket criteria and repository evidence
+compatibility: opencode-v2
+---
+
+## Required plan
+
+1. Ticket or request and objective.
+2. Acceptance criteria, each mapped to current evidence and an intended verification.
+3. Affected modules, components, files, APIs, data, and dependencies.
+4. Proposed implementation steps in dependency order.
+5. Test plan by unit, integration, component, and e2e level as applicable.
+6. Exact quality-gate commands for affected modules.
+7. Security, compatibility, concurrency, data, rollout, and operational risks.
+8. Non-goals and unchanged behavior.
+9. Expected changed files and approximate changed lines.
+10. Alternatives considered and why the proposed option fits existing conventions.
+11. Questions and assumptions.
+
+Every expected file must have a reason. Plans must be specific enough that the developer does not need to invent architecture. End with `WAITING FOR APPROVAL`; no production edit is allowed before explicit approval.

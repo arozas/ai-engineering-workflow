@@ -1,0 +1,5 @@
+{
+  "id": "clean",
+  "contextSkills": ["architecture-clean"],
+  "description": "Clean Architecture dependency direction"
+}

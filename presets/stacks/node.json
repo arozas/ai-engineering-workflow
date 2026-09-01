@@ -1,0 +1,5 @@
+{
+  "id": "node",
+  "contextSkills": ["stack-node"],
+  "description": "Node.js, JavaScript, and TypeScript projects"
+}

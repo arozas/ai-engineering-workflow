@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI Engineering Workflow distribution manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "version", "templatePath", "installationMetadata", "scripts", "projectPresetsPath", "stackPresetsPath", "architecturePresetsPath"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "name": { "const": "ai-engineering-workflow" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "templatePath": { "type": "string", "minLength": 1 },
+    "installationMetadata": { "type": "string", "minLength": 1 },
+    "scripts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["install", "newProject", "update", "validate"],
+      "properties": {
+        "install": { "type": "string" },
+        "newProject": { "type": "string" },
+        "update": { "type": "string" },
+        "validate": { "type": "string" }
+      }
+    },
+    "projectPresetsPath": { "type": "string" },
+    "stackPresetsPath": { "type": "string" },
+    "architecturePresetsPath": { "type": "string" }
+  }
+}

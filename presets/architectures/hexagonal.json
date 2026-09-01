@@ -1,0 +1,5 @@
+{
+  "id": "hexagonal",
+  "contextSkills": ["architecture-hexagonal"],
+  "description": "Ports and adapters architecture"
+}
