@@ -27,7 +27,8 @@ Do not guess missing project conventions. Report uncertainty and ask for approva
 7. Run the exact deterministic quality commands from `.ai/project.json`.
 8. Obtain an independent read-only review.
 9. Correct BLOCKER and HIGH findings, then re-run the gate and review. Stop after three review cycles.
-10. Present an explanation and PR description for human review. Never commit, push, merge, or deploy automatically.
+10. Present an explanation and PR description for human review.
+11. Only when the user explicitly requests delivery, use the dedicated `delivery` agent for one approved branch, commit, normal feature-branch push, or draft PR operation at a time.
 
 ## Engineering rules
 
@@ -40,6 +41,7 @@ Do not guess missing project conventions. Report uncertainty and ask for approva
 - Never introduce secrets or read or modify `.env` files. Example environment files may be read when needed.
 - Keep unrelated user changes intact.
 - If actual changed files exceed twice the approved estimate, or changed lines exceed three times the estimate, stop and explain the scope expansion.
+- Every workflow-created commit must follow Conventional Commits and must never attribute authorship, co-authorship, or generation to Claude, Codex, ChatGPT, Copilot, OpenCode, or any other AI model, tool, or agent.
 
 ## Deterministic quality policy
 
@@ -49,6 +51,8 @@ LLM judgment never overrides command results. A gate passes only when every conf
 
 Review findings use `BLOCKER`, `HIGH`, `MEDIUM`, `LOW`, or `NIT` and include file, line, category, evidence, impact, and recommended fix. Any BLOCKER or HIGH finding makes the verdict FAIL. The reviewer never edits files.
 
-## Safety boundary
+## Delivery and safety boundary
 
-Never run destructive Git operations, create commits, push, merge, rebase, deploy, mutate cloud infrastructure, or change secrets. If such an action is necessary, stop and request explicit human action.
+All agents except `delivery` must never create branches, stage files, commit, push, or create pull requests. The `delivery` agent may perform exactly one explicitly approved operation through the managed `.ai/scripts/` safeguards: create a local feature branch, create one Conventional Commit from exact staged files, push the current feature branch normally, or create one draft pull request.
+
+Each operation requires current PASS gate evidence, a review without BLOCKER or HIGH findings, an unchanged delivery check, and a new one-time human approval. Approval for one operation never authorizes the next. Never use force or force-with-lease, rewrite history, push tags, delete refs, update protected/shared branches, mark a PR ready, request reviewers, merge, release, deploy, mutate cloud infrastructure, or read/change secrets.

@@ -23,6 +23,8 @@ The workflow turns tickets, specifications, and written requirements into eviden
 - [Skills](#skills)
 - [Project configuration](#project-configuration)
 - [Deterministic quality gates](#deterministic-quality-gates)
+- [Gated delivery workflow](#gated-delivery-workflow)
+- [Pull-request template](#pull-request-template)
 - [Azure DevOps integration](#azure-devops-integration)
 - [Safety model](#safety-model)
 - [Extending the distribution](#extending-the-distribution)
@@ -42,12 +44,12 @@ It provides:
 - Evidence-based detection of modules, languages, frameworks, architecture, tests, build systems, CI/CD, and repository conventions.
 - Ticket and specification analysis with testable acceptance criteria.
 - A mandatory human approval point before production code changes.
-- Specialized orchestrator, developer, reviewer, and tester agents.
+- Specialized orchestrator, developer, reviewer, tester, and delivery agents.
 - Stack and architecture guidance loaded only when relevant.
 - Deterministic, exit-code-based quality gates.
 - Read-only Azure DevOps work-item retrieval.
 - Safe installation and hash-aware updates.
-- PR preparation without automatic Git or remote mutations.
+- Guarded feature-branch creation, Conventional Commits, normal feature-branch pushes, and draft PR creation with one-time human approvals.
 
 This project does **not** attempt to replace project-specific conventions, CI/CD, code ownership, or human engineering judgment.
 
@@ -75,7 +77,7 @@ The reviewer can inspect the ticket, approved plan, diff, Git history, and gate 
 
 ### Delivery remains human-controlled
 
-The workflow never commits, pushes, merges, rebases, deploys, mutates cloud infrastructure, or changes secrets automatically.
+The workflow never performs a delivery mutation automatically. A dedicated `delivery` agent can create one local feature branch, Conventional Commit, normal feature-branch push, or draft pull request only after the exact operation is proposed, repository state is revalidated, and the user gives a new one-time approval. Merge, history rewriting, release, deployment, secret handling, and cloud mutations remain manual and denied.
 
 ## How the workflow fits together
 
@@ -99,7 +101,14 @@ Scoped implementation plan
 Developer -> deterministic gates -> tester -> read-only reviewer
         |
         v
-Explanation and PR description for human delivery
+Explanation + detailed PR draft
+        |
+        | separate approval for each operation
+        v
+Feature branch -> Conventional Commit -> normal push -> draft PR
+        |
+        v
+Manual review, merge, release, and deployment
 ```
 
 The distribution and consumer roles are intentionally separated:
@@ -117,6 +126,8 @@ ai-engineering-workflow/
 ├── VERSION
 ├── workflow.manifest.json
 ├── workflow.manifest.schema.json
+├── .github/
+│   └── pull_request_template.md
 │
 ├── scripts/
 │   ├── Workflow.Common.ps1
@@ -148,11 +159,20 @@ ai-engineering-workflow/
     ├── AGENTS.md
     ├── opencode.json
     ├── .ai/
+    │   ├── .gitignore
+    │   ├── pull-request-template.md
     │   ├── project.example.json
     │   ├── project.schema.json
     │   ├── project-rules.md
     │   ├── bootstrap-input.schema.json
-    │   └── workflow-installation.schema.json
+    │   ├── workflow-installation.schema.json
+    │   └── scripts/
+    │       ├── delivery-check.ps1
+    │       ├── create-branch.ps1
+    │       ├── validate-commit-message.ps1
+    │       ├── commit-approved.ps1
+    │       ├── publish-approved.ps1
+    │       └── create-draft-pr.ps1
     └── .opencode/
         ├── agents/
         ├── commands/
@@ -169,7 +189,7 @@ ai-engineering-workflow/
 - Read and write access to the target repository.
 - The target must be outside the workflow distribution directory.
 
-The current management scripts are PowerShell-only. The installed OpenCode payload itself is plain Markdown and JSON.
+The distribution management scripts and guarded consumer delivery scripts are PowerShell-only. The remaining OpenCode payload is Markdown and JSON.
 
 ### Required for workflow execution
 
@@ -182,6 +202,7 @@ No model is pinned by the base template. Agents inherit the model selected in th
 ### Optional tools
 
 - Git, when `new-project.ps1 -InitializeGit` is used.
+- GitHub CLI, when the approved workflow creates a draft pull request.
 - .NET SDK, for the `dotnet-webapi` preset.
 - Node.js and npm, for the `react-vite` preset and for working with Node projects.
 - Python, for working with the `python-basic` preset.
@@ -386,6 +407,9 @@ consumer-repository/
 ├── AGENTS.md
 ├── opencode.json
 ├── .ai/
+│   ├── .gitignore                         # ignores the local PR draft
+│   ├── pull-request-template.md           # canonical consumer PR structure
+│   ├── scripts/                           # guarded delivery operations
 │   ├── project-rules.md
 │   ├── project.example.json
 │   ├── project.schema.json
@@ -393,6 +417,7 @@ consumer-repository/
 │   ├── workflow-installation.schema.json
 │   ├── workflow-installation.json       # generated by installation
 │   ├── bootstrap-input.json              # generated for new projects
+│   ├── pr-draft.md                        # ignored; written after PR approval
 │   └── project.json                      # generated after approved bootstrap
 └── .opencode/
     ├── agents/
@@ -410,6 +435,9 @@ For an existing repository installed with `install.ps1`, `.ai/bootstrap-input.js
 - `.ai/project-rules.md`: approved repository-specific architecture and engineering rules.
 - `.ai/workflow-installation.json`: distribution version and managed-file hashes used by updates.
 - `.ai/bootstrap-input.json`: project-generator intent; it is not authoritative evidence.
+- `.ai/pull-request-template.md`: detailed structure required by `/pr` and `/pr-create`.
+- `.ai/pr-draft.md`: ignored local copy of the exact approved PR body.
+- `.ai/scripts/`: guarded, deterministic wrappers for delivery checks and approved Git/GitHub mutations.
 - `.opencode/agents/`: specialized agent definitions.
 - `.opencode/commands/`: slash-command prompt templates.
 - `.opencode/skills/`: reusable, on-demand workflow, stack, and architecture instructions.
@@ -494,8 +522,10 @@ Examples:
 6. Run `/review` for the independent read-only review.
 7. If BLOCKER or HIGH findings exist, approve a correction cycle and repeat gates and review. The configured maximum is three cycles.
 8. Run `/explain` for a human-oriented implementation walkthrough.
-9. Run `/pr` to draft a title, description, risks, evidence, and checklist.
-10. Review and perform commit, push, PR creation, merge, and deployment manually.
+9. Run `/pr` to draft the title and complete canonical PR template.
+10. Run `/delivery-check` and resolve every readiness blocker.
+11. Optionally run `/branch`, `/commit`, `/publish`, and `/pr-create` in order. Review and explicitly approve each exact operation separately.
+12. Review the draft PR and perform readiness changes, reviewer assignment, merge, release, and deployment manually.
 
 ### Slash commands
 
@@ -507,9 +537,14 @@ Examples:
 | `/test` | Derive acceptance scenarios, add tests only in recognized test paths, and run quality gates. | Tests only |
 | `/review` | Delegate an independent review against ticket, plan, diff, and gate evidence. | No |
 | `/explain` | Explain behavior, design choices, risks, deviations, and review order. | No |
-| `/pr` | Draft a pull-request title and description. | No |
+| `/pr` | Draft a title and detailed body using `.ai/pull-request-template.md`. | No |
+| `/delivery-check` | Combine Git state, gates, review, scope, and diff evidence into a delivery-readiness verdict. | No |
+| `/branch` | Propose and create one approved local feature branch. | Git metadata only |
+| `/commit` | Stage exact approved paths and create one validated Conventional Commit. | Git index and local history |
+| `/publish` | Push the current feature branch normally to an explicitly approved remote. | Remote feature branch |
+| `/pr-create` | Create one explicitly approved draft PR from the published branch. | Draft PR only |
 
-Commands are intentionally composable. `/implement` does not silently start repeated developer/reviewer correction cycles unless the user has authorized the full workflow.
+Commands are intentionally composable. `/implement` does not silently start repeated developer/reviewer correction cycles unless the user has authorized the full workflow. Delivery approval never carries forward: approving a commit does not approve a push, and approving a push does not approve PR creation.
 
 ## Agents
 
@@ -519,8 +554,9 @@ Commands are intentionally composable. `/implement` does not silently start repe
 | `developer` | Subagent | Implements the explicitly approved plan using the smallest correct diff and project conventions. | Stops with `PLAN INVALIDATED` when evidence contradicts the plan; cannot launch subagents. |
 | `reviewer` | Subagent | Reviews correctness, security, architecture, regressions, tests, and scope independently. | Read-only; arbitrary shell and all file edits are denied. Only safe Git inspection commands are allowed. |
 | `tester` | Subagent | Converts acceptance criteria into scenarios and adds the smallest valuable tests. | May edit recognized test paths only; never production code. Returns `TESTABILITY ISSUE` when production changes are required. |
+| `delivery` | Subagent | Revalidates delivery state and performs one approved branch, commit, push, or draft PR operation through managed scripts. | Cannot edit files or use arbitrary shell; merge, force, protected branches, tags, releases, deployments, and secret/cloud mutations remain denied. |
 
-The orchestrator can delegate only to `developer`, `reviewer`, `tester`, and OpenCode's read-only `explore` agent.
+The orchestrator can delegate only to `developer`, `reviewer`, `tester`, `delivery`, and OpenCode's read-only `explore` agent.
 
 ## Skills
 
@@ -536,6 +572,8 @@ Skills are discovered from `.opencode/skills/` and loaded on demand.
 - `code-review`: defines structured independent review and severity rules.
 - `explain-changes`: prepares a human code-review walkthrough.
 - `pr-description`: drafts a traceable pull-request description.
+- `conventional-commit`: defines allowed commit types, format, and the AI-attribution prohibition.
+- `delivery-safety`: defines readiness evidence, one-operation approvals, and mutation boundaries.
 - `azure-devops-ticket`: retrieves and normalizes Azure DevOps work items read-only.
 
 ### Stack skills
@@ -660,6 +698,138 @@ The gate stops a module after its first failure unless the user explicitly reque
 
 The agent may diagnose a failure, but it must not silently change commands, append flags, skip required checks, weaken assertions, delete failing tests, or suppress warnings merely to produce a passing result.
 
+## Gated delivery workflow
+
+Delivery is opt-in and separated from implementation. The `delivery` agent is the only agent that can request the narrow permissions needed for branch creation, staging, commit, push, or draft PR creation. It operates through managed scripts and stops after one approved mutation.
+
+### Readiness check
+
+Run:
+
+```text
+/delivery-check
+```
+
+The check combines:
+
+- current branch and HEAD SHA
+- configured remote and upstream
+- staged, unstaged, and untracked paths
+- latest approved implementation plan
+- actual diff and diff-budget status
+- deterministic gate evidence
+- independent review verdict and unresolved findings
+
+It reports `READY FOR DELIVERY` only when every required input is current. A missing plan, stale gate result, BLOCKER/HIGH finding, changed SHA, unrelated file, protected environment file, or scope mismatch produces `DELIVERY NOT READY`.
+
+### Create a feature branch
+
+```text
+/branch
+```
+
+The command proposes one branch name and waits for approval. The managed script requires a clean working tree, validates the ref name, refuses an existing branch, and blocks shared/protected names including `main`, `master`, `develop`, `development`, `trunk`, and `release`.
+
+Branch approval does not authorize a commit.
+
+### Create a Conventional Commit
+
+```text
+/commit
+```
+
+The command presents the exact file paths, subject, optional body, branch, HEAD, and acceptance-criteria mapping before asking for approval.
+
+Every workflow commit uses:
+
+```text
+<type>(optional-scope)(optional-!): <description>
+```
+
+Allowed types are `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, and `revert`. Subjects are limited to 72 characters.
+
+The workflow never adds AI authorship or co-authorship. It rejects messages containing attribution such as `Co-authored-by: Claude`, `Generated-by: ChatGPT`, `by Claude`, `byclaude`, or equivalent attribution to Anthropic, OpenAI, Codex, Copilot, Gemini, Cursor, OpenCode, or another AI agent.
+
+Commit safeguards:
+
+- Stage only explicitly approved file paths with `git add -- <paths>`.
+- Never use `git add -A`, `git add .`, a directory path, `git commit -a`, or `--amend`.
+- Inspect the cached diff after staging.
+- Reject staged `.env` and `.env.*` files other than `.env.example`.
+- Validate the exact message before and after commit creation.
+- Preserve the human Git identity already configured in the repository.
+- Stop after reporting the commit SHA; do not push automatically.
+
+### Publish a feature branch
+
+```text
+/publish
+```
+
+Before approval, the command displays the remote name and URL, branch, HEAD SHA, and exact remote ref. The managed publisher requires a completely clean working tree and performs only a normal push of the current feature branch.
+
+It never uses force, force-with-lease, tags, ref deletion, or a protected/shared branch. If the normal push is rejected because the remote changed, the workflow stops and reports the conflict instead of retrying with a more permissive command.
+
+Push approval does not authorize PR creation.
+
+### Create a draft pull request
+
+First draft the complete content:
+
+```text
+/pr
+```
+
+Then create it only after reviewing the exact base, head, title, and body:
+
+```text
+/pr-create
+```
+
+After approval, the orchestrator writes the approved body to the ignored `.ai/pr-draft.md`. The managed script requires a clean working tree, a published feature branch with an upstream, and no existing open PR for that branch. It calls GitHub CLI with explicit base and head and always creates a draft.
+
+The creation flow does not request reviewers, assign users, apply labels, add comments, include issue-closing keywords without approval, mark the PR ready, enable auto-merge, or merge it.
+
+### Operations that remain manual
+
+- Marking a draft ready for review.
+- Requesting reviewers or assigning people.
+- Applying labels, milestones, or project items.
+- Adding comments or approvals.
+- Merge and auto-merge.
+- Rebase, reset, amend, force push, tag, and ref deletion.
+- Releases and deployments.
+- Database execution, secrets, and cloud mutations.
+
+## Pull-request template
+
+The distribution maintains two identical copies of the detailed template:
+
+- [`.github/pull_request_template.md`](.github/pull_request_template.md) is used by GitHub for contributions to this distribution repository.
+- [`template/.ai/pull-request-template.md`](template/.ai/pull-request-template.md) is installed into consumer repositories and is required by `/pr` and `/pr-create`.
+
+The distribution validator fails when the two copies differ.
+
+The template contains:
+
+- summary, related work, problem, and solution
+- included scope and explicit non-goals
+- change classification
+- acceptance-criteria traceability
+- module and file impact
+- design, data flow, alternatives, and dependencies
+- API, compatibility, data, and migration impact
+- security, privacy, reliability, performance, and observability
+- exact deterministic gate evidence
+- test scenarios and manual verification
+- independent review results
+- deployment, rollout, and rollback considerations
+- risks and known limitations
+- visual evidence and reviewer guidance
+- final scope, quality, security, operations, and delivery checklists
+
+Every section must remain present. Use `Not applicable` with a reason instead of deleting a section, and never represent a command or review as successful without evidence.
+
 ## Azure DevOps integration
 
 Azure DevOps support is optional and read-only.
@@ -710,11 +880,12 @@ The installed `opencode.json`:
 - Denies access outside the repository.
 - Allows skills.
 - Requires approval for shell commands by default.
-- Allows safe Git inspection such as `git status`, `git diff`, `git log`, and `git show`.
-- Denies `git commit`, `git push`, `git merge`, `git rebase`, `git reset`, and `git clean`.
+- Allows narrowly scoped, read-only Git and GitHub PR inspection.
+- Denies direct staging, branch mutation, commit, push, PR mutation, merge, rebase, reset, clean, tag, release, secret, variable, and workflow-dispatch commands.
+- Denies direct invocation of managed mutation scripts for every agent except `delivery`.
 - Denies common infrastructure mutations such as Terraform apply/destroy, Kubernetes apply/delete, and Azure deployments.
 
-Agent-specific permissions further restrict the orchestrator, reviewer, and tester.
+Agent-specific permissions further restrict the orchestrator, reviewer, tester, and delivery agent. The delivery agent's later, narrow `ask` rules override only the exact managed operations and still require a permission decision.
 
 ### Human gates
 
@@ -726,8 +897,12 @@ Explicit approval is required before:
 - Changing public contracts.
 - Editing migrations, CI/CD, or infrastructure beyond approved scope.
 - Starting correction loops when the full workflow was not already authorized.
+- Creating one local feature branch.
+- Staging an exact file list and creating one Conventional Commit.
+- Pushing one feature branch normally.
+- Creating one draft pull request with exact approved content.
 
-Commit, push, PR creation, merge, deployment, secrets, and cloud mutations remain manual operations outside this workflow.
+Each delivery approval is single-purpose and state-bound. Commit, push, and draft PR creation can be requested through the gated delivery workflow, but are never automatic. Merge, ready-for-review transitions, releases, deployments, secrets, and cloud mutations remain manual operations outside this workflow.
 
 ### Scope control
 
@@ -867,8 +1042,14 @@ Before releasing a change:
 - [ ] At least one offline preset is created and its tests pass.
 - [ ] `update.ps1 -DryRun` succeeds for an unchanged installation.
 - [ ] An update aborts when a managed file was locally modified.
-- [ ] OpenCode discovers `orchestrator`, `developer`, `reviewer`, and `tester` in a consumer repository.
+- [ ] OpenCode discovers `orchestrator`, `developer`, `reviewer`, `tester`, and `delivery` in a consumer repository.
 - [ ] The reviewer remains effectively read-only.
+- [ ] Non-delivery agents cannot invoke managed mutation scripts.
+- [ ] The commit-message validator accepts valid Conventional Commits and rejects non-conventional or AI-attributed messages.
+- [ ] Branch creation rejects protected/shared names and a dirty working tree.
+- [ ] Publishing uses a normal feature-branch push and has no force fallback.
+- [ ] Draft PR creation requires explicit base/head, an upstream branch, and the canonical template.
+- [ ] The repository and consumer pull-request templates have identical hashes.
 - [ ] The distribution root is not detected as a consumer configuration.
 - [ ] No secrets, generated credentials, or local `.env` files are included.
 
@@ -947,7 +1128,9 @@ The workflow reports retrieval gaps and does not fall back to a write-capable op
 - Azure DevOps is the only built-in work-item provider.
 - Built-in stack skills currently cover .NET, Java, Node.js, Python, and React.
 - Built-in architecture skills currently cover Clean Architecture, Hexagonal Architecture, Vertical Slice, and Event-Driven systems.
-- The workflow prepares PR content but does not create a PR.
+- The gated delivery workflow can create draft PRs on GitHub; other hosting providers are not built in.
+- GitHub CLI is required for draft PR creation.
+- The workflow does not mark PRs ready, request reviewers, apply labels, merge, release, or deploy.
 - The workflow does not configure CI/CD or deployment automatically.
 - File installation and updates perform full conflict preflight, but are not transactional against unexpected filesystem failures.
 - OpenCode V2 is evolving; validate the distribution again after upgrading the CLI.

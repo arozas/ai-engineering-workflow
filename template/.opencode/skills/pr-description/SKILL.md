@@ -4,7 +4,7 @@ description: Draft a traceable pull-request title and description from approved 
 compatibility: opencode-v2
 ---
 
-Produce a concise imperative title and a description with:
+Read `.ai/pull-request-template.md` and preserve its complete section order. Produce a concise imperative title and a detailed body with:
 
 - linked ticket or request
 - problem and intent
@@ -17,4 +17,4 @@ Produce a concise imperative title and a description with:
 - risks and manual verification steps
 - reviewer checklist
 
-Never say checks passed unless the gate report proves it. Never create, push, approve, or merge the pull request.
+Write `Not applicable` with a concise reason instead of omitting a section. Never say checks passed unless the gate report proves it. Do not include issue-closing keywords, reviewers, assignees, labels, comments, or rollout claims unless the user explicitly approved them. Never create, push, mark ready, approve, or merge the pull request.

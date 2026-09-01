@@ -25,9 +25,18 @@ foreach ($required in @(
     'template\.ai\project.schema.json',
     'template\.ai\bootstrap-input.schema.json',
     'template\.ai\workflow-installation.schema.json',
+    'template\.ai\pull-request-template.md',
+    'template\.ai\scripts\validate-commit-message.ps1',
+    'template\.ai\scripts\commit-approved.ps1',
+    'template\.ai\scripts\publish-approved.ps1',
+    'template\.ai\scripts\create-draft-pr.ps1',
     'template\.opencode\agents\orchestrator.md',
+    'template\.opencode\agents\delivery.md',
     'template\.opencode\commands\ai-bootstrap.md',
+    'template\.opencode\commands\commit.md',
+    'template\.opencode\commands\pr-create.md',
     'template\.opencode\skills\repo-bootstrap\SKILL.md'
+    '.github\pull_request_template.md'
 )) {
     if (-not (Test-Path -LiteralPath (Join-Path $workflowRoot $required) -PathType Leaf)) {
         $errors += "Missing required file: $required"
@@ -43,12 +52,22 @@ foreach ($jsonFile in Get-ChildItem -LiteralPath $workflowRoot -Recurse -File -F
     }
 }
 
-foreach ($scriptFile in Get-ChildItem -LiteralPath (Join-Path $workflowRoot 'scripts') -File -Filter '*.ps1') {
-    $tokens = $null
-    $parseErrors = $null
-    [System.Management.Automation.Language.Parser]::ParseFile($scriptFile.FullName, [ref]$tokens, [ref]$parseErrors) | Out-Null
-    foreach ($parseError in @($parseErrors)) {
-        $errors += "PowerShell parse error in $($scriptFile.Name): $($parseError.Message)"
+foreach ($scriptRoot in @('scripts', 'template\.ai\scripts')) {
+    foreach ($scriptFile in Get-ChildItem -LiteralPath (Join-Path $workflowRoot $scriptRoot) -File -Filter '*.ps1') {
+        $tokens = $null
+        $parseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($scriptFile.FullName, [ref]$tokens, [ref]$parseErrors) | Out-Null
+        foreach ($parseError in @($parseErrors)) {
+            $errors += "PowerShell parse error in $(Get-NormalizedRelativePath -Root $workflowRoot -Path $scriptFile.FullName): $($parseError.Message)"
+        }
+    }
+}
+
+$repositoryPrTemplate = Join-Path $workflowRoot '.github\pull_request_template.md'
+$consumerPrTemplate = Join-Path $workflowRoot 'template\.ai\pull-request-template.md'
+if ((Test-Path -LiteralPath $repositoryPrTemplate) -and (Test-Path -LiteralPath $consumerPrTemplate)) {
+    if ((Get-FileSha256 -Path $repositoryPrTemplate) -ne (Get-FileSha256 -Path $consumerPrTemplate)) {
+        $errors += 'Repository and consumer pull-request templates must remain identical.'
     }
 }
 

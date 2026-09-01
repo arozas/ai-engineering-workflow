@@ -1,0 +1,10 @@
+---
+description: Push the current approved feature branch normally after explicit approval
+agent: orchestrator
+---
+
+Load `delivery-safety`. Require an approved conventional commit, a completely clean working tree, fresh gate/review evidence, a non-protected feature branch, and the exact remote URL.
+
+Show the remote, remote URL, branch, HEAD SHA, and ref that will be created or advanced. Wait for explicit approval of that exact push. Then delegate only `.ai/scripts/publish-approved.ps1` to `delivery`.
+
+Use a normal push only. Never force, use force-with-lease, push tags, delete refs, or push a protected/shared branch. Report the remote ref and SHA, then stop without creating a pull request.
