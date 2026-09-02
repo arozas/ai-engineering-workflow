@@ -39,13 +39,13 @@ The implementation is also documented at its source boundaries:
 
 ## Official OpenCode documentation
 
-- [Configuration](https://opencode.ai/docs/config/)
-- [CLI](https://opencode.ai/docs/cli/)
-- [Server](https://opencode.ai/docs/server/)
+- [Configuration](https://opencode.ai/v2/docs/config/)
+- [CLI](https://opencode.ai/v2/docs/cli/)
+- [Server and troubleshooting](https://opencode.ai/v2/docs/troubleshooting/)
 - [Agents](https://opencode.ai/v2/docs/agents)
 - [Permissions](https://opencode.ai/v2/docs/permissions)
 - [Custom tools](https://opencode.ai/docs/custom-tools)
-- [Commands](https://opencode.ai/docs/commands/)
-- [Skills](https://opencode.ai/docs/skills/)
+- [Commands](https://opencode.ai/v2/docs/commands/)
+- [Skills](https://opencode.ai/v2/docs/skills/)
 
 The distribution targets OpenCode V2 semantics. In particular, permission rules are ordered and shell permission resources represent complete raw commands. That is why automatically allowed workflow operations are exposed as typed custom tools instead of permissive trailing-wildcard shell rules.

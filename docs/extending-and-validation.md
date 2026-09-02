@@ -171,11 +171,11 @@ The workflow itself does not tag, publish a release, merge, or deploy automatica
 
 ## Compatibility references
 
-- [OpenCode configuration](https://opencode.ai/docs/config/)
-- [OpenCode CLI](https://opencode.ai/docs/cli/)
-- [OpenCode server](https://opencode.ai/docs/server/)
+- [OpenCode configuration](https://opencode.ai/v2/docs/config/)
+- [OpenCode CLI](https://opencode.ai/v2/docs/cli/)
+- [OpenCode server and troubleshooting](https://opencode.ai/v2/docs/troubleshooting/)
 - [OpenCode agents](https://opencode.ai/v2/docs/agents)
 - [OpenCode permissions](https://opencode.ai/v2/docs/permissions)
 - [OpenCode custom tools](https://opencode.ai/docs/custom-tools)
-- [OpenCode commands](https://opencode.ai/docs/commands/)
-- [OpenCode skills](https://opencode.ai/docs/skills/)
+- [OpenCode commands](https://opencode.ai/v2/docs/commands/)
+- [OpenCode skills](https://opencode.ai/v2/docs/skills/)

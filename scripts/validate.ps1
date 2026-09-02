@@ -265,10 +265,14 @@ foreach ($scriptContract in @{
     }
 }
 
-$installOutputContent = (Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\install.ps1') -Raw) +
-    (Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\new-project.ps1') -Raw)
-if ($installOutputContent -match '(?m)^.*opencode2.*$') {
-    $errors += 'Onboarding scripts must invoke the official opencode executable name.'
+foreach ($onboardingScript in @('scripts\install.ps1', 'scripts\new-project.ps1')) {
+    $onboardingContent = Get-Content -LiteralPath (Join-Path $workflowRoot $onboardingScript) -Raw
+    if ($onboardingContent -notmatch '(?m)^\s*Write-Host\s+''\s+opencode2''\s*$') {
+        $errors += "$onboardingScript must invoke the OpenCode V2 executable name: opencode2."
+    }
+    if ($onboardingContent -match '(?m)^\s*Write-Host\s+''\s+opencode''\s*$') {
+        $errors += "$onboardingScript must not point users to the V1 opencode executable."
+    }
 }
 $openCodeSmokeContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\smoke-opencode.ps1') -Raw
 foreach ($smokeToken in @('opencode2', '/api/health', '/global/health', '/api/agent', '/api/command', '/api/experimental/tool/ids', 'directory=', 'Authorization', '<redacted>', 'workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate')) {

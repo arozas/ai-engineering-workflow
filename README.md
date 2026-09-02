@@ -55,7 +55,7 @@ Then start OpenCode inside the consumer repository:
 
 ```powershell
 cd "C:\path\to\application"
-opencode
+opencode2
 ```
 
 Run:
@@ -156,18 +156,18 @@ pwsh -NoProfile -File .\tests\Run-Tests.ps1
 pwsh -NoProfile -File .\scripts\smoke-opencode.ps1
 ```
 
-The first two commands require Git and PowerShell and form the required CI gate. The smoke test additionally requires the OpenCode V2 CLI package (`@opencode-ai/cli@beta`) and prefers the V2 executable (`opencode2`) because this template uses OpenCode V2 permissions. It starts a local model-free server and verifies that OpenCode discovers every installed agent, command, and typed workflow tool. The smoke test is intentionally manual while OpenCode V2 is beta; required CI remains deterministic and independent of beta runtime drift. The isolated suite also proves run-level staging, reviewer, branch, commit, remote publish, and draft-PR evidence binding.
+The first two commands require Git and PowerShell and form the required CI gate. The smoke test additionally requires the OpenCode V2 CLI package (`@opencode-ai/cli@beta`) and the V2 executable (`opencode2`) because this template uses OpenCode V2 permissions. It starts a local model-free server and verifies that OpenCode discovers every installed agent, command, and typed workflow tool. The smoke test is intentionally manual while OpenCode V2 is beta; required CI remains deterministic and independent of beta runtime drift. The isolated suite also proves run-level staging, reviewer, branch, commit, remote publish, and draft-PR evidence binding.
 
 ## OpenCode references
 
-- [Configuration](https://opencode.ai/docs/config/)
-- [CLI](https://opencode.ai/docs/cli/)
-- [Server](https://opencode.ai/docs/server/)
+- [Configuration](https://opencode.ai/v2/docs/config/)
+- [CLI](https://opencode.ai/v2/docs/cli/)
+- [Server and troubleshooting](https://opencode.ai/v2/docs/troubleshooting/)
 - [Agents](https://opencode.ai/v2/docs/agents)
 - [Permissions](https://opencode.ai/v2/docs/permissions)
 - [Custom tools](https://opencode.ai/docs/custom-tools)
-- [Commands](https://opencode.ai/docs/commands/)
-- [Skills](https://opencode.ai/docs/skills/)
+- [Commands](https://opencode.ai/v2/docs/commands/)
+- [Skills](https://opencode.ai/v2/docs/skills/)
 
 ## License
 

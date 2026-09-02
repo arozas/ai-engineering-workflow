@@ -12,7 +12,7 @@ model: provider/model-id
 ---
 ```
 
-Keep provider credentials outside the repository and follow the [OpenCode agent](https://opencode.ai/v2/docs/agents) and [model/provider](https://opencode.ai/docs/models/) documentation. Model availability and identifiers vary by provider and account.
+Keep provider credentials outside the repository and follow the [OpenCode agent](https://opencode.ai/v2/docs/agents) and [model/provider](https://opencode.ai/v2/docs/models/) documentation. Model availability and identifiers vary by provider and account.
 
 Changing a model is a control-plane change. In a consumer repository, make it through an explicitly reviewed workflow configuration update. Active runs will detect the changed agent file and must be restarted.
 
