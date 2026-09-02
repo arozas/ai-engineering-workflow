@@ -17,9 +17,9 @@ Installation remains deterministic and model-independent. Personalization is a s
 - CI/CD and convention files;
 - manifest hashes and a structural fingerprint.
 
-During proposal the final profile is not written. Bootstrap then performs one bounded evidence scan: at most 20 relevant manifests/configuration files, three representative source and three test files per candidate module, and 18 representative files overall. It keeps a ledger and does not repeat equivalent searches.
+During proposal the final profile is not written. `/ai-bootstrap` delegates draft creation to the deterministic `workflow_bootstrap_prepare` tool, backed by `.ai/scripts/prepare-bootstrap-proposal.ps1`. The preparer profiles the repository, applies conservative inference rules, writes `.ai/bootstrap-proposal/`, and validates the draft as a dry run.
 
-If OpenCode does not expose `workflow_profile_project`, bootstrap may use exactly one controlled fallback: `pwsh -NoProfile -File .ai/scripts/profile-project.ps1`. The fallback is still read-only and must be reported as `PROFILE FALLBACK USED`. It is not permission to browse the repository manually.
+If OpenCode does not expose `workflow_bootstrap_prepare`, bootstrap may use exactly one controlled fallback: `pwsh -NoProfile -File .ai/scripts/prepare-bootstrap-proposal.ps1`. The fallback owns profiling and draft generation. It is not permission to browse the repository manually.
 
 Empty repositories stop with `NO PROJECT MODULES DETECTED`. The distribution repository stops with `BOOTSTRAP NOT APPLICABLE`. Bootstrap never invents a module to satisfy the schema.
 

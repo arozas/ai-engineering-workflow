@@ -257,6 +257,14 @@ export const profile_project = tool({
   },
 })
 
+export const bootstrap_prepare = tool({
+  description: "Prepare a durable bootstrap proposal under .ai/bootstrap-proposal and validate it as a dry run.",
+  args: {},
+  async execute(_input, context) {
+    return invokePowerShell("prepare-bootstrap-proposal.ps1", [], context)
+  },
+})
+
 export const bootstrap_apply = tool({
   description: "Validate and apply the approved durable bootstrap proposal from .ai/bootstrap-proposal.",
   args: {

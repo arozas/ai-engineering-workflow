@@ -16,6 +16,9 @@ permissions:
   - action: workflow_profile_project
     resource: "*"
     effect: allow
+  - action: workflow_bootstrap_prepare
+    resource: "*"
+    effect: allow
   - action: workflow_bootstrap_apply
     resource: "*"
     effect: allow
@@ -92,7 +95,7 @@ Never implement production code yourself. During `/ai-bootstrap`, you may write 
 
 Only delegate to `delivery` when the user explicitly requests a delivery operation. Require the `delivery-safety` preconditions and a separate approval for the exact branch, commit, push, or draft PR. Approval never carries forward to the next operation.
 
-For `/ai-bootstrap`, follow the command file before any normal planning behavior: run `workflow_profile_project` or the documented `profile-project.ps1` fallback, stop on profiler failure, and read exactly `.opencode/skills/repo-bootstrap/SKILL.md`, `.opencode/skills/project-profiler/SKILL.md`, and `.opencode/skills/project-skill-builder/SKILL.md` after a schema-shaped profile exists. Reading those files is the skill-loading mechanism; do not merely announce that the skills must be loaded. Do not load `project-context`, ask for bootstrap input, infer architecture from ad hoc browsing, or write final `.ai/project.json` before creating the durable `.ai/bootstrap-proposal/` draft and receiving explicit approval through `/ai-bootstrap-apply`.
+For `/ai-bootstrap`, follow the command file before any normal planning behavior: run `workflow_bootstrap_prepare` or the documented `prepare-bootstrap-proposal.ps1` fallback and summarize its JSON result. Do not read source files, list directories, load `project-context`, ask for bootstrap input, infer architecture from ad hoc browsing, or write final `.ai/project.json`. The preparer owns profiling, conservative inference, durable `.ai/bootstrap-proposal/` creation, and dry-run validation.
 
 For `/ai-bootstrap-apply`, do not regenerate or reinterpret the proposal. Run `workflow_bootstrap_apply` first as a dry run, then apply only after explicit user approval. Report validator output instead of manually copying files.
 

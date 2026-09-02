@@ -32,9 +32,9 @@ Run the installer dry run again. Do not add broad tracked `.gitignore` entries a
 
 Current bootstrap has strict scan budgets and should stop after one profile plus bounded evidence reads. Confirm the installed workflow version is current and `/ai-bootstrap` is running in the consumer application, not the distribution repository.
 
-If OpenCode says `Unknown tool 'workflow_profile_project'`, current bootstrap should run the controlled read-only fallback `pwsh -NoProfile -File .ai/scripts/profile-project.ps1`, report `PROFILE FALLBACK USED`, and continue from that single profile. If it starts broad manual exploration instead, update the installed workflow from this distribution before retrying.
+If OpenCode says `Unknown tool 'workflow_bootstrap_prepare'`, current bootstrap should run the controlled fallback `pwsh -NoProfile -File .ai/scripts/prepare-bootstrap-proposal.ps1`. If it starts broad manual exploration instead, update the installed workflow from this distribution before retrying.
 
-If `/ai-bootstrap` loads `project-context`, asks for a generic bootstrap input confirmation, or writes final `.ai/project.json` immediately after a short `yes`, the installed control plane is stale or inconsistent. Current bootstrap must not use `project-context` before a profile exists, and it must write only draft files under `.ai/bootstrap-proposal/` before approval.
+If `/ai-bootstrap` loads `project-context`, asks for a generic bootstrap input confirmation, explores source files by itself, or writes final `.ai/project.json` immediately after a short `yes`, the installed control plane is stale or inconsistent. Current bootstrap must call `workflow_bootstrap_prepare` or its fallback and write only draft files under `.ai/bootstrap-proposal/` before approval.
 
 If `/ai-bootstrap` repeats that the profile succeeded and that it must load `repo-bootstrap`, `project-profiler`, and `project-skill-builder`, the runtime/model is treating skill loading as narration instead of an action. Current bootstrap defines concrete file reads for those skills: `.opencode/skills/repo-bootstrap/SKILL.md`, `.opencode/skills/project-profiler/SKILL.md`, and `.opencode/skills/project-skill-builder/SKILL.md`. Update the installed workflow before retrying.
 
