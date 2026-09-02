@@ -277,9 +277,14 @@ foreach ($smokeToken in @('opencode2', '/api/health', '/global/health', '/api/ag
     }
 }
 $ciContent = Get-Content -LiteralPath (Join-Path $workflowRoot '.github\workflows\validate.yml') -Raw
-foreach ($ciToken in @("OPENCODE_V2_PACKAGE: '@opencode-ai/cli@beta'", '$env:OPENCODE_V2_PACKAGE', 'opencode2 --version', 'opencode-v2-smoke:', 'continue-on-error: true')) {
+foreach ($ciToken in @('Validate distribution contracts', 'Run isolated workflow tests')) {
     if ($ciContent -notmatch [regex]::Escape($ciToken)) {
-        $errors += "CI is missing supported OpenCode V2 or canary contract: $ciToken."
+        $errors += "CI is missing deterministic validation contract: $ciToken."
+    }
+}
+foreach ($ciToken in @('opencode-v2-smoke:', 'npm install --global', 'opencode2 --version', 'smoke-opencode.ps1')) {
+    if ($ciContent -match [regex]::Escape($ciToken)) {
+        $errors += "Required CI must not depend on OpenCode V2 beta smoke testing: $ciToken."
     }
 }
 

@@ -9,9 +9,6 @@ on:
 permissions:
   contents: read
 
-env:
-  OPENCODE_V2_PACKAGE: '@opencode-ai/cli@beta'
-
 jobs:
   validate:
     runs-on: windows-latest
@@ -27,23 +24,3 @@ jobs:
       - name: Run isolated workflow tests
         shell: pwsh
         run: ./tests/Run-Tests.ps1
-
-  opencode-v2-smoke:
-    runs-on: windows-latest
-    timeout-minutes: 15
-    continue-on-error: true
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Install OpenCode V2 CLI canary
-        shell: pwsh
-        run: npm install --global "$env:OPENCODE_V2_PACKAGE"
-
-      - name: Verify OpenCode V2 CLI canary
-        shell: pwsh
-        run: opencode2 --version
-
-      - name: Smoke-test OpenCode V2 discovery
-        shell: pwsh
-        run: ./scripts/smoke-opencode.ps1

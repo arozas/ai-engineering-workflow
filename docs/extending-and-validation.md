@@ -138,7 +138,7 @@ pwsh -NoProfile -File .\scripts\smoke-opencode.ps1
 
 The smoke test creates a temporary consumer repository, installs Local mode, starts the V2 executable on loopback without a model call, and queries the documented health, agent, command, and tool-ID endpoints. It prefers `opencode2` because the template uses OpenCode V2 permissions; falling back to the V1 `opencode` executable will reject `template/opencode.json`. It fails when an agent or command cannot be discovered, either reviewer-specific tool is missing, another typed TypeScript tool cannot load, or the server cannot parse the installed configuration.
 
-CI has two lanes. The required `validate` job runs only deterministic checks: static distribution validation and the isolated PowerShell test suite. The separate `opencode-v2-smoke` job installs the current OpenCode V2 beta package (`@opencode-ai/cli@beta`), runs discovery smoke testing, and is non-blocking. Because OpenCode V2 is still beta, review upstream changes deliberately before treating a canary failure as a workflow defect; a breaking upstream release should warn maintainers without making every known-good change unmergeable.
+CI has one required lane. The `validate` job runs only deterministic checks: static distribution validation and the isolated PowerShell test suite. Keep `scripts/smoke-opencode.ps1` as a manual compatibility check while OpenCode V2 is beta; it should inform maintenance work, not block known-good workflow changes.
 
 Static validation remains useful for precise policy invariants, and the isolated PowerShell suite remains useful for deterministic state behavior. Neither substitutes for loading the distribution through the real OpenCode runtime.
 

@@ -156,7 +156,7 @@ pwsh -NoProfile -File .\tests\Run-Tests.ps1
 pwsh -NoProfile -File .\scripts\smoke-opencode.ps1
 ```
 
-The first two commands require Git and PowerShell and form the required CI gate. The smoke test additionally requires the OpenCode V2 CLI package (`@opencode-ai/cli@beta`) and prefers the V2 executable (`opencode2`) because this template uses OpenCode V2 permissions. It starts a local model-free server and verifies that OpenCode discovers every installed agent, command, and typed workflow tool. CI runs that smoke test in a separate non-blocking V2 compatibility job so beta runtime drift is visible without blocking deterministic workflow changes. The isolated suite also proves run-level staging, reviewer, branch, commit, remote publish, and draft-PR evidence binding.
+The first two commands require Git and PowerShell and form the required CI gate. The smoke test additionally requires the OpenCode V2 CLI package (`@opencode-ai/cli@beta`) and prefers the V2 executable (`opencode2`) because this template uses OpenCode V2 permissions. It starts a local model-free server and verifies that OpenCode discovers every installed agent, command, and typed workflow tool. The smoke test is intentionally manual while OpenCode V2 is beta; required CI remains deterministic and independent of beta runtime drift. The isolated suite also proves run-level staging, reviewer, branch, commit, remote publish, and draft-PR evidence binding.
 
 ## OpenCode references
 
