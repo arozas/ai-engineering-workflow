@@ -12,6 +12,7 @@ The workflow prevents an agent from converting a plausible narrative into unauth
 - an exact approved quality matrix;
 - independent read-only review;
 - separately approved delivery operations;
+- run-isolated staging and independently verified remote delivery evidence;
 - default denial of secrets, external directories, destructive Git, deployments, and cloud mutation.
 
 ## Permission model
@@ -50,6 +51,8 @@ The runner accepts only `RunId`. It requires `IMPLEMENTING`, reconstructs the ma
 
 Gate evidence requires run/project/runner/matrix identity plus fingerprints and results. Recording compares exact module count/order, IDs, paths, phase count/order/names, command count/order/text, derived statuses, hashes, and worktree/control-plane stability. Evidence omitting a module or substituting a harmless command is rejected even if schema-valid.
 
+All candidate artifacts use `.ai/runtime/<run-id>/<artifact>`. State rejects a correct filename supplied from another run or from the shared runtime root. This prevents concurrent sessions from replacing one another's pending evidence.
+
 ## Quality command risks
 
 Configured commands are executable repository policy. Bootstrap cites their source and the user approves them. Typed gates prevent agent selection changes; they cannot make a malicious approved command safe.
@@ -58,7 +61,7 @@ Review command changes like CI scripts. Never configure deployment, production a
 
 ## Secrets and incident evidence
 
-The workflow denies common secret paths and never requests secret access. Sanitize incident evidence before it enters prompts or `.ai/runtime/`. Do not paste tokens, connection strings, private keys, production payloads, or personal data into tickets, runs, or PR drafts.
+The workflow denies common secret paths and never requests secret access. Sanitize incident evidence before it enters prompts or `.ai/runtime/<run-id>/`. Do not paste tokens, connection strings, private keys, production payloads, or personal data into tickets, runs, or PR drafts.
 
 Diagnostic artifacts assert that no secrets were accessed and no production mutation occurred. Validation rejects unsafe claims.
 
@@ -77,7 +80,7 @@ Rules include:
 - no reviewers, labels, assignees, comments, merge, or auto-merge;
 - no release, deployment, secret, workflow-dispatch, or cloud mutation.
 
-Gate/review evidence is tied to the exact worktree diff. Later changes invalidate readiness.
+Gate/review evidence is tied to the exact worktree diff. Later changes invalidate readiness. Publish recording uses `git ls-remote` to prove the configured upstream ref points to the persisted commit. Draft-PR recording uses `gh pr view` to prove the number, URL, base, head, head SHA, title, open state, and draft state. Agent-authored delivery JSON alone cannot advance state.
 
 ## Installation trust
 

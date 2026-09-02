@@ -23,7 +23,8 @@ opencode.json
   project.json
   project-rules.md
   schemas and deterministic scripts
-  runtime/ and runs/ local evidence
+  runtime/<run-id>/ isolated staging
+  runs/<run-id>/ canonical local evidence
 .opencode/
   agents/
   commands/
@@ -83,7 +84,7 @@ Every standard, fast-path, or diagnostic request gets one local run:
 
 Only artifacts relevant to the route are present. `state.json` records legal status, route, task type, source diagnosis, Git SHA, worktree and control-plane fingerprints, correction limits, diagnostic limits, the approved quality plan, timestamps, and SHA-256 hashes of canonical artifacts.
 
-Candidate inputs are written under `.ai/runtime/`. The state tool validates and copies them into the run. Agents must never directly edit canonical run files.
+Candidate inputs are written under `.ai/runtime/<run-id>/`. The state tool accepts only the exact artifact name under the matching run ID, validates it, and copies it into the canonical run. Two active runs therefore cannot overwrite each other's request, plan, gate, review, diagnosis, or delivery evidence. Agents must never directly edit canonical run files.
 
 ## Standard state flow
 
@@ -95,7 +96,7 @@ PLANNING
   -> READY_FOR_DELIVERY or REVIEW_FAILED
   -> COMMITTED
   -> PUBLISHED
-  -> PULL_REQUEST_OPEN
+  -> DRAFT_PR_CREATED
 ```
 
 Correction transitions are bounded by project policy and never exceed three. Invalid scope or evidence enters `ESCALATED`. The fast path uses the same evidence model with a maximum of one correction.
@@ -104,9 +105,9 @@ Correction transitions are bounded by project policy and never exceed three. Inv
 
 ```text
 DIAGNOSING
-  -> ROOT_CAUSE_CONFIRMED
-  -> DIAGNOSIS_BLOCKED
-  -> ESCALATED
+  +-> ROOT_CAUSE_CONFIRMED
+  +-> DIAGNOSIS_BLOCKED -> DIAGNOSING
+  +-> ESCALATED
 ```
 
 A blocked diagnostic run may begin another explicitly approved bounded iteration. A confirmed diagnosis does not authorize code changes; only `/ticket diagnosis:<run-id>` creates a traceable standard implementation run.
@@ -128,6 +129,12 @@ When a plan is approved, state persists:
 The gate tool accepts a run ID, not module IDs. It reconstructs the quality plan and rejects stale configuration before execution. Gate recording independently compares every evidence module, path, phase, and command with the approved plan. This prevents partial runs or schema-valid fabricated evidence from advancing state.
 
 Root-level modules with path `.` are valid. Path canonicalization accepts the repository root itself but rejects any path that escapes it.
+
+## Delivery evidence binding
+
+Delivery evidence is not trusted merely because it is schema-valid. `RecordPublish` verifies the current branch, current and persisted SHA, configured upstream, and exact `git ls-remote` result before entering `PUBLISHED`. `RecordPullRequest` queries GitHub through `gh pr view` and compares the PR number, URL, base, head, head SHA, title, open state, and draft state before entering `DRAFT_PR_CREATED`.
+
+Evidence schemas deliberately omit the remote URL from the persisted publish record because Git remote URLs can contain credentials. The verifier resolves the configured remote locally without copying it into run evidence.
 
 ## Design trade-offs
 

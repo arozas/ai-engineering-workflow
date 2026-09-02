@@ -132,3 +132,5 @@ Presets are starting points, not evidence about an existing repository. Existing
 7. Wait for `PROJECT_VALID` before using `/ticket`, `/diagnose`, or `/ai-refresh`.
 
 The bootstrap proposal is read-only. Approval applies to the displayed configuration only; repository drift between proposal and persistence blocks the write.
+
+Every later workflow run stages its candidate artifacts under `.ai/runtime/<run-id>/`; concurrent OpenCode sessions must keep and pass their exact run IDs. Local mode excludes both runtime staging and canonical `.ai/runs/<run-id>/` evidence from application commits.

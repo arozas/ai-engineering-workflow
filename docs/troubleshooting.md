@@ -70,7 +70,7 @@ The gate tool requires a persisted run in `IMPLEMENTING` status with an approved
 
 ## Gate evidence is rejected
 
-Only the current `.ai/runtime/gates.json` written by `workflow_gate` is accepted. Rejection may indicate:
+Only `.ai/runtime/<run-id>/gates.json` written by `workflow_gate` for the same run is accepted. Rejection may indicate:
 
 - wrong run ID;
 - omitted or reordered module;
@@ -80,6 +80,8 @@ Only the current `.ai/runtime/gates.json` written by `workflow_gate` is accepted
 - worktree changes during/after gates;
 - control-plane changes;
 - verdict not matching command-derived status.
+
+An artifact at `.ai/runtime/gates.json` or under another run ID is rejected even when its content is otherwise valid. Use the exact run ID throughout the command and do not move evidence between runtime directories.
 
 Rerun the complete gate after resolving the underlying drift. Never repair evidence manually.
 
@@ -117,6 +119,12 @@ Confirm:
 
 Each delivery operation needs fresh approval. Approval for commit is not approval for push or PR creation.
 
+## Publish or PR evidence is rejected
+
+`RecordPublish` requires schema-valid `.ai/runtime/<run-id>/publish.json`, then independently checks the named branch, current/persisted SHA, upstream, and exact remote ref with Git. Confirm the normal push completed, the branch still has the expected upstream, and no commit was added afterward.
+
+`RecordPullRequest` requires schema-valid `.ai/runtime/<run-id>/pull-request.json`, then queries GitHub CLI. Confirm `gh auth status`, the PR number, base/head branches, head SHA, title, open state, and draft state. A ready-for-review, closed, retitled, or advanced PR no longer matches the approved evidence and is deliberately rejected.
+
 ## Commit message is rejected
 
 Use a Conventional Commits subject, for example:
@@ -141,7 +149,11 @@ Do not overwrite blindly; an agent permission or schema customization may be sec
 
 The suite includes child processes that intentionally return nonzero for negative assertions. The top-level test script must explicitly exit zero after all assertions. Use the current `tests/Run-Tests.ps1`; older versions could leak the last expected child exit code to the job.
 
-The Node runtime deprecation warning from an upstream GitHub Action is separate from PowerShell test success. Update the action version when an official compatible release is available; do not suppress the warning by weakening runtime safety.
+The workflow uses the current Node 24-based checkout action. If a runtime deprecation warning reappears, update to an official compatible action release; do not suppress it by forcing an insecure runtime.
+
+## OpenCode smoke discovery fails
+
+Run `opencode --version`, then execute `scripts/smoke-opencode.ps1` locally. The test does not call a model; it verifies the local server health and discovery endpoints. Failure usually means the installed OpenCode version cannot parse `opencode.json`, one Markdown definition has invalid frontmatter, or `.opencode/tools/workflow.ts` cannot load. Inspect the reported missing names or temporary server error, fix the distribution source, and rerun all validation layers.
 
 ## Collecting useful support evidence
 

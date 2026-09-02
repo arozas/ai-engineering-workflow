@@ -58,7 +58,7 @@ The tester may add focused tests only in established test locations. If testing 
 
 Array order within a phase is preserved. An empty phase is `NOT CONFIGURED`. The first failure normally stops that module and later commands become `NOT RUN`. A module with no configured commands is incomplete, not passing.
 
-The runner writes `.ai/runtime/gates.json`. State independently validates the run ID, module identities and paths, phases and commands, hashes, exit-derived status, and worktree stability before accepting it.
+The runner writes `.ai/runtime/<run-id>/gates.json`. State accepts only that run-specific path and independently validates the run ID, module identities and paths, phases and commands, hashes, exit-derived status, and worktree stability before accepting it. Other active runs keep separate staging directories.
 
 ### Review
 
@@ -112,9 +112,9 @@ Delivery is split into single operations:
 4. `/publish` proposes a normal feature-branch push.
 5. `/pr-create` proposes a draft PR with explicit base and head.
 
-Each operation requires a fresh proposal, revalidation, and approval. Approval does not carry forward. The delivery agent stops after one operation and records evidence.
+Each operation requires a fresh proposal, revalidation, and approval. Approval does not carry forward. The delivery agent stops after one operation and records evidence under `.ai/runtime/<run-id>/`.
 
-Commits stage exact paths only; broad staging, amend, and AI authorship trailers are forbidden. Publishing never force-pushes, pushes tags, deletes refs, or publishes a protected/shared branch. PR creation does not add reviewers, labels, assignees, comments, merge, or auto-merge.
+Commits stage exact paths only; broad staging, amend, and AI authorship trailers are forbidden. Publishing never force-pushes, pushes tags, deletes refs, or publishes a protected/shared branch. State independently verifies the published remote ref and SHA. PR creation does not add reviewers, labels, assignees, comments, merge, or auto-merge; state independently queries GitHub and requires the exact open draft PR metadata before recording success.
 
 Merge, rebase, reset, release, deployment, secret mutation, and cloud mutation remain outside the workflow.
 

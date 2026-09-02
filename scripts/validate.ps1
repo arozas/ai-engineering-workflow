@@ -23,6 +23,7 @@ foreach ($required in @(
     'scripts\Workflow.Common.ps1',
     'scripts\install.ps1',
     'scripts\new-project.ps1',
+    'scripts\smoke-opencode.ps1',
     'scripts\update.ps1',
     'scripts\summarize-evaluations.ps1',
     'tests\Run-Tests.ps1',
@@ -47,6 +48,8 @@ foreach ($required in @(
     'template\.ai\workflow-installation.schema.json',
     'template\.ai\workflow-run.schema.json',
     'template\.ai\quality-gates.schema.json',
+    'template\.ai\publish-evidence.schema.json',
+    'template\.ai\pull-request-evidence.schema.json',
     'template\.ai\diagnosis.schema.json',
     'template\.ai\pull-request-template.md',
     'template\.ai\scripts\fast-path-check.ps1',
@@ -142,6 +145,7 @@ $quickFixAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'templ
 $developerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\developer.md') -Raw
 $quickReviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\quick-reviewer.md') -Raw
 $orchestratorAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\orchestrator.md') -Raw
+$deliveryAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\delivery.md') -Raw
 if ($quickFixAgentContent -notmatch '(?m)^steps:\s*16\s*$') {
     $errors += 'quick-fix agent must keep its bounded 16-step budget.'
 }
@@ -159,8 +163,17 @@ foreach ($agentDefinition in @{
         }
     }
 }
-if ($quickFixAgentContent -notmatch '(?ms)- action:\s*edit\s+resource:\s*"\.ai/runtime/gates\.json"\s+effect:\s*deny') {
+if ($quickFixAgentContent -notmatch '(?ms)- action:\s*edit\s+resource:\s*"\.ai/runtime/\*/gates\.json"\s+effect:\s*deny') {
     $errors += 'quick-fix must not write deterministic gate evidence directly.'
+}
+if ($orchestratorAgentContent -notmatch '(?ms)- action:\s*edit\s+resource:\s*"\.ai/runtime/\*/gates\.json"\s+effect:\s*deny') {
+    $errors += 'orchestrator must not write deterministic gate evidence directly.'
+}
+foreach ($deliveryArtifact in @('commit.json', 'publish.json', 'pull-request.json')) {
+    $pattern = '(?ms)- action:\s*edit\s+resource:\s*"\.ai/runtime/\*/' + [regex]::Escape($deliveryArtifact) + '"\s+effect:\s*allow'
+    if ($deliveryAgentContent -notmatch $pattern) {
+        $errors += "delivery must be able to stage its validated run-specific evidence file: $deliveryArtifact."
+    }
 }
 $typedToolContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\tools\workflow.ts') -Raw
 foreach ($toolExport in @('state', 'gate', 'fast_path', 'validate_project', 'profile_project', 'validate_diagnosis', 'delivery_check')) {
@@ -192,13 +205,28 @@ foreach ($requiredRunnerToken in @('quality-gates.schema.json', 'startedWorktree
         $errors += "Quality-gate runner is missing deterministic evidence field or check: $requiredRunnerToken."
     }
 }
+if ($qualityRunnerContent -notmatch [regex]::Escape('.ai\runtime\$RunId\gates.json')) {
+    $errors += 'Quality-gate evidence must be isolated under the current run ID.'
+}
 $runnerPreamble = $qualityRunnerContent.Substring(0, $qualityRunnerContent.IndexOf('function '))
 if ($runnerPreamble -match '\$ModuleId') {
     $errors += 'Quality-gate runner must derive modules from persisted run state, not caller-selected ModuleId input.'
 }
-foreach ($requiredStateToken in @('Get-ValidatedGateEvidence', 'Get-ControlPlaneFingerprint', 'Assert-ControlPlane', 'affectedModuleIds', 'matrixSha256', 'Quality-gate command mismatch')) {
+foreach ($requiredStateToken in @('Resolve-RunRuntimeArtifact', 'Get-ValidatedGateEvidence', 'Get-ValidatedPublishEvidence', 'Get-ValidatedPullRequestEvidence', 'ls-remote', 'ghCommand.Source pr view', 'Get-ControlPlaneFingerprint', 'Assert-ControlPlane', 'affectedModuleIds', 'matrixSha256', 'Quality-gate command mismatch')) {
     if ($workflowStateContent -notmatch [regex]::Escape($requiredStateToken)) {
         $errors += "Workflow state is missing deterministic protection: $requiredStateToken."
+    }
+}
+
+$installOutputContent = (Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\install.ps1') -Raw) +
+    (Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\new-project.ps1') -Raw)
+if ($installOutputContent -match '(?m)^.*opencode2.*$') {
+    $errors += 'Onboarding scripts must invoke the official opencode executable name.'
+}
+$openCodeSmokeContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\smoke-opencode.ps1') -Raw
+foreach ($smokeToken in @('/global/health', '/agent', '/command', '/experimental/tool/ids', 'workflow_state', 'workflow_gate')) {
+    if ($openCodeSmokeContent -notmatch [regex]::Escape($smokeToken)) {
+        $errors += "OpenCode smoke test is missing discovery check: $smokeToken."
     }
 }
 

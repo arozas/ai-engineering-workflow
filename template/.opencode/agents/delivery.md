@@ -13,6 +13,15 @@ permissions:
   - action: edit
     resource: "*"
     effect: deny
+  - action: edit
+    resource: ".ai/runtime/*/commit.json"
+    effect: allow
+  - action: edit
+    resource: ".ai/runtime/*/publish.json"
+    effect: allow
+  - action: edit
+    resource: ".ai/runtime/*/pull-request.json"
+    effect: allow
   - action: shell
     resource: "*"
     effect: deny
@@ -74,4 +83,4 @@ For commits, stage only the exact approved file paths with `git add -- <paths>`.
 
 For publishing, use only `.ai/scripts/publish-approved.ps1`. Never force push, push tags, delete refs, or publish a protected/shared branch. For pull requests, use only `.ai/scripts/create-draft-pr.ps1`; create a draft with explicit base and head and no automatic reviewers, assignees, labels, comments, merge, or auto-merge.
 
-Use each permission approval once. After the approved operation, write the required delivery evidence to `.ai/runtime/`, record the operation in the persisted run, verify and report the exact branch, commit SHA, remote ref, or PR URL, then stop. Never chain the next delivery stage without a new explicit approval.
+Use each permission approval once. After the approved operation, write the required delivery evidence to `.ai/runtime/<run-id>/`, record the operation in the persisted run, verify and report the exact branch, commit SHA, remote ref, or PR URL, then stop. Never chain the next delivery stage without a new explicit approval.

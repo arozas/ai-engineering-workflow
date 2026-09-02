@@ -17,7 +17,7 @@ permissions:
     resource: ".ai/runtime/*"
     effect: allow
   - action: edit
-    resource: ".ai/runtime/gates.json"
+    resource: ".ai/runtime/*/gates.json"
     effect: deny
   - action: edit
     resource: ".ai/runs/*"

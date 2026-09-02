@@ -20,7 +20,7 @@ This directory contains the detailed operating and design documentation for AI E
 - Examples use PowerShell 7 because the distribution scripts target Windows and cross-platform `pwsh`.
 - Commands shown for maintainers are not automatically available to every installed agent. Agent permissions are defined separately.
 - `.ai/project.json` is the consumer project's machine-readable context after approved bootstrap.
-- `.ai/runs/` and `.ai/runtime/` are local evidence and staging areas, not application delivery content.
+- `.ai/runs/` contains canonical evidence and `.ai/runtime/<run-id>/` contains isolated staging; neither is application delivery content.
 - Project behavior is evidence-driven. Unknowns remain unknown instead of being filled with fashionable defaults.
 - An LLM statement is never a substitute for schema validation, an exit code, a hash, or a persisted approval.
 
@@ -40,6 +40,8 @@ The implementation is also documented at its source boundaries:
 ## Official OpenCode documentation
 
 - [Configuration](https://opencode.ai/docs/config/)
+- [CLI](https://opencode.ai/docs/cli/)
+- [Server](https://opencode.ai/docs/server/)
 - [Agents](https://opencode.ai/v2/docs/agents)
 - [Permissions](https://opencode.ai/v2/docs/permissions)
 - [Custom tools](https://opencode.ai/docs/custom-tools)

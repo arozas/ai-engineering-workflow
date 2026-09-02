@@ -12,12 +12,12 @@ It converts tickets, specifications, written requirements, and unknown productio
 - Repository profiling and an approval-gated, project-specific `.ai/project.json`.
 - Selective stack, architecture, and generated project skills per module.
 - Standard, fast-path, and production-diagnosis workflows.
-- Persisted, hash-verified run state under local `.ai/runs/` records.
+- Persisted, hash-verified run state under local `.ai/runs/` records, with isolated staging under `.ai/runtime/<run-id>/`.
 - An orchestrator plus specialized developer, tester, reviewer, diagnostician, quick-fix, and delivery agents.
 - Deterministic quality gates bound to the exact modules and commands approved in the plan.
 - Read-only Azure DevOps work-item integration.
 - Local-first installation that avoids workflow files in consumer commits by default.
-- Guarded branch, Conventional Commit, push, and draft-PR operations with separate human approvals.
+- Guarded branch, Conventional Commit, push, and draft-PR operations with separate human approvals and remote verification.
 
 The workflow does not replace repository conventions, CI/CD, code ownership, or human judgment. Merge, history rewriting, release, deployment, secret handling, and cloud mutations remain manual and denied.
 
@@ -152,13 +152,16 @@ Detailed guidance lives under [`docs/`](docs/README.md):
 ```powershell
 pwsh -NoProfile -File .\scripts\validate.ps1
 pwsh -NoProfile -File .\tests\Run-Tests.ps1
+pwsh -NoProfile -File .\scripts\smoke-opencode.ps1
 ```
 
-Validation covers the manifest, schemas, presets, definitions, scripts, typed tool boundary, permission invariants, concise README policy, templates, and PowerShell syntax. The isolated test suite installs the distribution into a temporary Git repository and exercises profiling, state, exact quality matrices, root modules, fast-path classification, production diagnosis, delivery evidence, and updater conflict detection.
+The first two commands require Git and PowerShell. The smoke test additionally requires the current `opencode` CLI; it starts a local model-free server and verifies that OpenCode discovers every installed agent, command, and typed workflow tool. CI installs the current OpenCode release and runs all three layers. The isolated suite also proves run-level staging isolation and independently verifies remote publish and draft-PR evidence.
 
 ## OpenCode references
 
 - [Configuration](https://opencode.ai/docs/config/)
+- [CLI](https://opencode.ai/docs/cli/)
+- [Server](https://opencode.ai/docs/server/)
 - [Agents](https://opencode.ai/v2/docs/agents)
 - [Permissions](https://opencode.ai/v2/docs/permissions)
 - [Custom tools](https://opencode.ai/docs/custom-tools)

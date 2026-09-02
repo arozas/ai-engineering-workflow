@@ -93,6 +93,7 @@ It verifies:
 - absence of automatic managed-script shell allowances;
 - presence and argument-vector implementation of typed tools;
 - quality runner/state matrix protections;
+- run-specific staging and remote delivery verification contracts;
 - installation metadata and Local-mode safety logic;
 - PR-template synchronization;
 - JSON syntax and PowerShell parsing.
@@ -117,10 +118,25 @@ The suite creates a temporary Git consumer, installs Local mode, and exercises:
 - fast-path actual scope;
 - control-plane and artifact tamper detection;
 - reviewed diff to commit evidence;
+- forged publish rejection plus real remote-ref verification;
+- GitHub draft-PR metadata verification through a deterministic CLI fixture;
 - reviewer isolation and typed-tool permissions;
 - benchmark summarization and updater conflicts.
 
 Expected child-process failures are assertions, not suite failures. The test script explicitly exits zero only after all assertions pass.
+
+## OpenCode discovery smoke test
+
+Install the current OpenCode CLI, then run:
+
+```powershell
+opencode --version
+pwsh -NoProfile -File .\scripts\smoke-opencode.ps1
+```
+
+The smoke test creates a temporary consumer repository, installs Local mode, starts `opencode serve` on loopback without a model call, and queries the documented health, agent, command, and tool-ID endpoints. It fails when an agent or command cannot be discovered, a typed TypeScript tool cannot load, or the server cannot parse the installed configuration. CI installs `opencode-ai@latest` so upstream compatibility drift becomes visible before release.
+
+Static validation remains useful for precise policy invariants, and the isolated PowerShell suite remains useful for deterministic state behavior. Neither substitutes for loading the distribution through the real OpenCode runtime.
 
 ## Pull-request documentation
 
@@ -140,17 +156,20 @@ For a release:
 3. Update documentation and examples.
 4. Run distribution validation.
 5. Run the isolated suite.
-6. Run `git diff --check`.
-7. Inspect the complete diff for generated files, credentials, machine paths, and accidental consumer state.
-8. Test a dry-run install/update against a representative repository.
-9. Prepare a Conventional Commit without AI authorship attribution.
-10. Use the normal human-reviewed PR/release process.
+6. Run the OpenCode discovery smoke test.
+7. Run `git diff --check`.
+8. Inspect the complete diff for generated files, credentials, machine paths, and accidental consumer state.
+9. Test a dry-run install/update against a representative repository.
+10. Prepare a Conventional Commit without AI authorship attribution.
+11. Use the normal human-reviewed PR/release process.
 
 The workflow itself does not tag, publish a release, merge, or deploy automatically.
 
 ## Compatibility references
 
 - [OpenCode configuration](https://opencode.ai/docs/config/)
+- [OpenCode CLI](https://opencode.ai/docs/cli/)
+- [OpenCode server](https://opencode.ai/docs/server/)
 - [OpenCode agents](https://opencode.ai/v2/docs/agents)
 - [OpenCode permissions](https://opencode.ai/v2/docs/permissions)
 - [OpenCode custom tools](https://opencode.ai/docs/custom-tools)

@@ -55,6 +55,20 @@ function Resolve-InRepositoryFile([string]$RepositoryRoot, [string]$Path) {
     return $resolved
 }
 
+function Resolve-RunRuntimeArtifact(
+    [string]$RepositoryRoot,
+    [string]$RunId,
+    [string]$Path,
+    [string]$FileName
+) {
+    $resolved = Resolve-InRepositoryFile -RepositoryRoot $RepositoryRoot -Path $Path
+    $expected = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot ".ai\runtime\$RunId\$FileName"))
+    if (-not [string]::Equals($resolved, $expected, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "This action accepts '$FileName' only from .ai/runtime/$RunId/$FileName."
+    }
+    return $resolved
+}
+
 function Get-WorktreeFingerprint([string]$RepositoryRoot, [string]$CurrentSha) {
     $temporaryIndex = Join-Path ([IO.Path]::GetTempPath()) ('ai-engineering-workflow-index-' + [Guid]::NewGuid().ToString('N'))
     $previousIndex = [Environment]::GetEnvironmentVariable('GIT_INDEX_FILE', 'Process')
@@ -163,10 +177,6 @@ function Get-QualityPlan([string]$RepositoryRoot, [string[]]$AffectedModuleIds) 
 }
 
 function Get-ValidatedGateEvidence([string]$SourcePath, [string]$RepositoryRoot, [System.Collections.IDictionary]$State) {
-    $expectedPath = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot '.ai\runtime\gates.json'))
-    if ([IO.Path]::GetFullPath($SourcePath) -ne $expectedPath) {
-        throw 'RecordGates accepts evidence only from .ai/runtime/gates.json.'
-    }
     $gateSchemaPath = Join-Path $RepositoryRoot '.ai\quality-gates.schema.json'
     $projectPath = Join-Path $RepositoryRoot '.ai\project.json'
     $runnerPath = Join-Path $RepositoryRoot '.ai\scripts\run-quality-gates.ps1'
@@ -268,6 +278,100 @@ function Get-ValidatedGateEvidence([string]$SourcePath, [string]$RepositoryRoot,
     }
 }
 
+function Get-ValidatedPublishEvidence(
+    [string]$SourcePath,
+    [string]$RepositoryRoot,
+    [System.Collections.IDictionary]$State
+) {
+    $schemaPath = Join-Path $RepositoryRoot '.ai\publish-evidence.schema.json'
+    if (-not (Test-Path -LiteralPath $schemaPath -PathType Leaf)) { throw "Publish evidence schema not found: $schemaPath" }
+    $json = Get-Content -LiteralPath $SourcePath -Raw
+    $schema = Get-Content -LiteralPath $schemaPath -Raw
+    if (-not ($json | Test-Json -Schema $schema -ErrorAction Stop)) { throw 'Publish evidence failed schema validation.' }
+    $evidence = $json | ConvertFrom-Json
+
+    $currentSha = Get-CurrentSha -RepositoryRoot $RepositoryRoot
+    $currentBranch = (& git -C $RepositoryRoot branch --show-current).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($currentBranch)) { throw 'Publish verification requires a named branch.' }
+    if ($currentBranch -match '^(main|master|develop|development|trunk|release)(/|$)') {
+        throw "Publish evidence targets protected or shared branch '$currentBranch'."
+    }
+    if ([string]$evidence.runId -ne [string]$State.runId) { throw 'Publish evidence belongs to a different workflow run.' }
+    if ([string]$evidence.sha -ne $currentSha -or [string]$evidence.sha -ne [string]$State.currentSha) {
+        throw 'Published SHA does not match the persisted run and current HEAD.'
+    }
+    if ([string]$evidence.branch -ne $currentBranch) { throw 'Published branch does not match the current branch.' }
+    $expectedRef = "refs/heads/$currentBranch"
+    if ([string]$evidence.ref -ne $expectedRef) { throw "Published ref must be '$expectedRef'." }
+
+    $remote = [string]$evidence.remote
+    $remoteUrl = (& git -C $RepositoryRoot remote get-url $remote 2>$null)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($remoteUrl)) { throw "Remote '$remote' is not configured." }
+    $upstream = (& git -C $RepositoryRoot rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $upstream.Trim() -ne "$remote/$currentBranch") {
+        throw "Current branch upstream is not '$remote/$currentBranch'."
+    }
+
+    $previousPrompt = [Environment]::GetEnvironmentVariable('GIT_TERMINAL_PROMPT', 'Process')
+    try {
+        [Environment]::SetEnvironmentVariable('GIT_TERMINAL_PROMPT', '0', 'Process')
+        $remoteRows = @(& git -C $RepositoryRoot ls-remote --exit-code $remote $expectedRef 2>$null)
+        if ($LASTEXITCODE -ne 0 -or $remoteRows.Count -ne 1) { throw "Remote ref '$remote/$currentBranch' could not be verified." }
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable('GIT_TERMINAL_PROMPT', $previousPrompt, 'Process')
+    }
+    $remoteSha = (($remoteRows[0] -split '\s+')[0]).ToLowerInvariant()
+    if ($remoteSha -ne $currentSha) { throw "Remote ref '$remote/$currentBranch' does not point to the recorded commit." }
+    return $evidence
+}
+
+function Get-ValidatedPullRequestEvidence(
+    [string]$SourcePath,
+    [string]$RepositoryRoot,
+    [System.Collections.IDictionary]$State
+) {
+    $schemaPath = Join-Path $RepositoryRoot '.ai\pull-request-evidence.schema.json'
+    if (-not (Test-Path -LiteralPath $schemaPath -PathType Leaf)) { throw "Pull-request evidence schema not found: $schemaPath" }
+    $json = Get-Content -LiteralPath $SourcePath -Raw
+    $schema = Get-Content -LiteralPath $schemaPath -Raw
+    if (-not ($json | Test-Json -Schema $schema -ErrorAction Stop)) { throw 'Pull-request evidence failed schema validation.' }
+    $evidence = $json | ConvertFrom-Json
+    if ([string]$evidence.runId -ne [string]$State.runId) { throw 'Pull-request evidence belongs to a different workflow run.' }
+
+    $currentSha = Get-CurrentSha -RepositoryRoot $RepositoryRoot
+    $currentBranch = (& git -C $RepositoryRoot branch --show-current).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($currentBranch)) { throw 'Pull-request verification requires a named branch.' }
+    if ([string]$evidence.head -ne $currentBranch) { throw 'Pull-request head does not match the current branch.' }
+    if ([string]$evidence.headSha -ne $currentSha -or [string]$evidence.headSha -ne [string]$State.currentSha) {
+        throw 'Pull-request head SHA does not match the persisted run and current HEAD.'
+    }
+
+    $ghCommand = Get-Command gh -ErrorAction SilentlyContinue
+    if ($null -eq $ghCommand) { throw 'GitHub CLI is required to verify pull-request evidence.' }
+    Push-Location $RepositoryRoot
+    try {
+        $actualJson = (& $ghCommand.Source pr view ([string]$evidence.number) --json 'number,url,baseRefName,headRefName,headRefOid,title,isDraft,state')
+        $ghSucceeded = $?
+        if (-not $ghSucceeded -or [string]::IsNullOrWhiteSpace($actualJson)) { throw 'GitHub CLI could not verify the pull request.' }
+    }
+    finally { Pop-Location }
+    $actual = $actualJson | ConvertFrom-Json
+    $checks = [ordered]@{
+        number = ([int]$actual.number -eq [int]$evidence.number)
+        url = ([string]$actual.url -eq [string]$evidence.url)
+        base = ([string]$actual.baseRefName -eq [string]$evidence.base)
+        head = ([string]$actual.headRefName -eq [string]$evidence.head)
+        headSha = ([string]$actual.headRefOid -eq [string]$evidence.headSha)
+        title = ([string]$actual.title -eq [string]$evidence.title)
+        draft = ([bool]$actual.isDraft -and [bool]$evidence.draft)
+        state = ([string]$actual.state -eq 'OPEN' -and [string]$evidence.state -eq 'OPEN')
+    }
+    $mismatches = @($checks.Keys | Where-Object { -not $checks[$_] })
+    if ($mismatches.Count -gt 0) { throw "Pull-request evidence does not match GitHub: $($mismatches -join ', ')." }
+    return $evidence
+}
+
 function Get-CommitFingerprint([string]$RepositoryRoot, [string]$ParentSha, [string]$CommitSha) {
     $baseline = if ($ParentSha -eq 'UNBORN') { '4b825dc642cb6eb9a060e54bf8d69288fbee4904' } else { $ParentSha }
     $diff = @(& git -C $RepositoryRoot diff --binary --no-ext-diff $baseline $CommitSha --)
@@ -343,7 +447,7 @@ if ($Action -eq 'Start') {
         throw 'Start requires WorkflowPath and TaskType.'
     }
     if (Test-Path -LiteralPath $runRoot) { throw "Workflow run already exists: $RunId" }
-    $requirementSource = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
+    $requirementSource = Resolve-RunRuntimeArtifact -RepositoryRoot $repositoryRoot -RunId $RunId -Path $ArtifactPath -FileName 'requirement.md'
     if (-not [string]::IsNullOrWhiteSpace($SourceRunId)) {
         if ($WorkflowPath -ne 'standard') { throw 'SourceRunId is supported only when starting a standard implementation run.' }
         $sourceRunRoot = Join-Path $runsRoot $SourceRunId
@@ -414,7 +518,7 @@ else {
             Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
             if ([string]::IsNullOrWhiteSpace($AffectedModules)) { throw 'ApprovePlan requires AffectedModules as a comma-separated list.' }
             $qualityPlan = Get-QualityPlan -RepositoryRoot $repositoryRoot -AffectedModuleIds @($AffectedModules.Split(',', [StringSplitOptions]::RemoveEmptyEntries))
-            $source = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
+            $source = Resolve-RunRuntimeArtifact -RepositoryRoot $repositoryRoot -RunId $RunId -Path $ArtifactPath -FileName 'plan.md'
             Add-Artifact -State $state -Name 'plan' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict 'PASS'
             $state.qualityPlan = [ordered]@{
                 affectedModuleIds = @($qualityPlan.AffectedModuleIds)
@@ -436,7 +540,7 @@ else {
             Assert-Head -State $state -RepositoryRoot $repositoryRoot
             Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
             if (@('PASS', 'FAIL') -notcontains $Verdict) { throw 'RecordGates requires Verdict PASS or FAIL.' }
-            $source = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
+            $source = Resolve-RunRuntimeArtifact -RepositoryRoot $repositoryRoot -RunId $RunId -Path $ArtifactPath -FileName 'gates.json'
             $gateEvidence = Get-ValidatedGateEvidence -SourcePath $source -RepositoryRoot $repositoryRoot -State $state
             if ($Verdict -ne [string]$gateEvidence.Verdict) {
                 throw "RecordGates verdict '$Verdict' does not match deterministic evidence '$($gateEvidence.Overall)'."
@@ -453,7 +557,7 @@ else {
             if ([string]::IsNullOrWhiteSpace($Verdict)) { throw 'RecordReview requires a verdict.' }
             $currentFingerprint = Get-WorktreeFingerprint -RepositoryRoot $repositoryRoot -CurrentSha ([string]$state.currentSha)
             if ($currentFingerprint -ne [string]$state.worktreeFingerprint) { throw 'Worktree changed after gates; rerun the complete gate before review.' }
-            $source = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
+            $source = Resolve-RunRuntimeArtifact -RepositoryRoot $repositoryRoot -RunId $RunId -Path $ArtifactPath -FileName 'review.md'
             Add-Artifact -State $state -Name 'review' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict $Verdict
             $state.status = switch ($Verdict) {
                 'PASS' { 'READY_FOR_DELIVERY' }
@@ -477,10 +581,11 @@ else {
         'RecordDiagnosis' {
             Assert-Status -State $state -Allowed @('DIAGNOSING')
             Assert-Head -State $state -RepositoryRoot $repositoryRoot
+            Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
             if (@('PASS', 'FAIL', 'ESCALATE') -notcontains $Verdict) { throw 'RecordDiagnosis requires Verdict PASS, FAIL, or ESCALATE.' }
             $next = [int]$state.diagnosticIterations + 1
             if ($next -gt [int]$state.maximumDiagnosticIterations) { throw 'Diagnostic iteration limit reached; escalate instead of continuing.' }
-            $source = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
+            $source = Resolve-RunRuntimeArtifact -RepositoryRoot $repositoryRoot -RunId $RunId -Path $ArtifactPath -FileName 'diagnosis.json'
             $diagnosisValidator = Join-Path $repositoryRoot '.ai\scripts\validate-diagnosis.ps1'
             $validationOutput = @(& $diagnosisValidator -Path $source -ExpectedRunId $RunId)
             if ($LASTEXITCODE -ne 0) { throw 'Diagnosis artifact failed deterministic validation.' }
@@ -532,7 +637,7 @@ else {
             if ($LASTEXITCODE -ne 0 -or $status.Count -gt 0) { throw 'RecordCommit requires a clean working tree.' }
             $committedFingerprint = Get-CommitFingerprint -RepositoryRoot $repositoryRoot -ParentSha ([string]$state.currentSha) -CommitSha $newSha
             if ($committedFingerprint -ne [string]$state.worktreeFingerprint) { throw 'Committed diff does not match the gate-reviewed worktree fingerprint.' }
-            $source = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
+            $source = Resolve-RunRuntimeArtifact -RepositoryRoot $repositoryRoot -RunId $RunId -Path $ArtifactPath -FileName 'commit.json'
             Add-Artifact -State $state -Name 'commit' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict 'PASS'
             $state.currentSha = $newSha
             $state.status = 'COMMITTED'
@@ -541,7 +646,9 @@ else {
         'RecordPublish' {
             Assert-Status -State $state -Allowed @('COMMITTED')
             Assert-Head -State $state -RepositoryRoot $repositoryRoot
-            $source = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
+            Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
+            $source = Resolve-RunRuntimeArtifact -RepositoryRoot $repositoryRoot -RunId $RunId -Path $ArtifactPath -FileName 'publish.json'
+            Get-ValidatedPublishEvidence -SourcePath $source -RepositoryRoot $repositoryRoot -State $state | Out-Null
             Add-Artifact -State $state -Name 'publish' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict 'PASS'
             $state.status = 'PUBLISHED'
             Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath
@@ -549,7 +656,9 @@ else {
         'RecordPullRequest' {
             Assert-Status -State $state -Allowed @('PUBLISHED')
             Assert-Head -State $state -RepositoryRoot $repositoryRoot
-            $source = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
+            Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
+            $source = Resolve-RunRuntimeArtifact -RepositoryRoot $repositoryRoot -RunId $RunId -Path $ArtifactPath -FileName 'pull-request.json'
+            Get-ValidatedPullRequestEvidence -SourcePath $source -RepositoryRoot $repositoryRoot -State $state | Out-Null
             Add-Artifact -State $state -Name 'pull-request' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict 'PASS'
             $state.status = 'DRAFT_PR_CREATED'
             Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath

@@ -113,5 +113,5 @@ else {
 }
 Write-Host 'Next:'
 Write-Host "  cd `"$targetRoot`""
-Write-Host '  opencode2'
+Write-Host '  opencode'
 Write-Host 'Then run /ai-bootstrap inside OpenCode to profile and personalize the repository.'

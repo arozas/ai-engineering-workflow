@@ -190,7 +190,7 @@ try {
     $gateSchemaPath = Join-Path $repositoryRoot '.ai\quality-gates.schema.json'
     $runSchemaPath = Join-Path $repositoryRoot '.ai\workflow-run.schema.json'
     $statePath = Join-Path $repositoryRoot ".ai\runs\$RunId\state.json"
-    $outputPath = Join-Path $repositoryRoot '.ai\runtime\gates.json'
+    $outputPath = Join-Path $repositoryRoot ".ai\runtime\$RunId\gates.json"
     $runnerPath = $MyInvocation.MyCommand.Path
 
     foreach ($requiredPath in @($projectPath, $projectSchemaPath, $gateSchemaPath, $runSchemaPath, $statePath, $runnerPath)) {

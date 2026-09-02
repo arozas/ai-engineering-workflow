@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI Engineering Workflow publish evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "runId",
+    "remote",
+    "branch",
+    "ref",
+    "sha",
+    "result",
+    "publishedAtUtc"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+    "remote": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+    "branch": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$" },
+    "ref": { "type": "string", "pattern": "^refs/heads/[A-Za-z0-9][A-Za-z0-9._/-]*$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "result": { "const": "PUBLISHED" },
+    "publishedAtUtc": { "type": "string", "format": "date-time" }
+  }
+}

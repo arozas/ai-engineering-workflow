@@ -16,14 +16,14 @@ Use a lowercase run ID of 3-64 characters, for example `ticket-18427` or `quick-
 
 Use only the typed `workflow_state` tool:
 
-1. Write the normalized request to `.ai/runtime/requirement.md`, then `Start` with `standard` or `fast-path`.
-2. Write the complete proposed plan to `.ai/runtime/plan.md`.
+1. Choose a unique run ID, write the normalized request to `.ai/runtime/<run-id>/requirement.md`, then `Start` with `standard` or `fast-path`.
+2. Write the complete proposed plan to `.ai/runtime/<run-id>/plan.md`.
 3. Only after explicit user approval, call `ApprovePlan` with that exact file and every affected module ID. The script copies and hashes the plan and freezes the exact project and quality-command matrix.
 4. Call `BeginImplementation` before production or test edits.
-5. Run `workflow_gate` with the run ID. It writes factual gate evidence to `.ai/runtime/gates.json`; then call `RecordGates` with `PASS` or `FAIL`.
-6. Pass the exact persisted requirement, plan, diff packet, and gates to the read-only reviewer. Write its returned result to `.ai/runtime/review.md`, then call `RecordReview`.
+5. Run `workflow_gate` with the run ID. It writes factual gate evidence to `.ai/runtime/<run-id>/gates.json`; then call `RecordGates` with `PASS` or `FAIL`.
+6. Pass the exact persisted requirement, plan, diff packet, and gates to the read-only reviewer. Write its returned result to `.ai/runtime/<run-id>/review.md`, then call `RecordReview`.
 7. Use `BeginCorrection` before an approved correction. The script enforces the workflow-specific limit.
-8. After an approved commit, write its evidence to `.ai/runtime/commit.json` and call `RecordCommit`; the script proves that the commit is the exact gate-reviewed diff.
+8. After an approved commit, write its evidence to `.ai/runtime/<run-id>/commit.json` and call `RecordCommit`; the script proves that the commit is the exact gate-reviewed diff.
 9. Record an approved push and draft PR with `RecordPublish` and `RecordPullRequest` respectively.
 10. Use `Escalate` when scope, evidence, or correction limits invalidate the current route.
 
@@ -32,7 +32,7 @@ Use only the typed `workflow_state` tool:
 Unknown production failures use a separate `diagnostic` path:
 
 1. Persist the sanitized incident report and call `Start`; the initial status is `DIAGNOSING`.
-2. Validate `.ai/runtime/diagnosis.json`, then call `RecordDiagnosis` with `PASS`, `FAIL`, or `ESCALATE`.
+2. Validate `.ai/runtime/<run-id>/diagnosis.json`, then call `RecordDiagnosis` with `PASS`, `FAIL`, or `ESCALATE`.
 3. `PASS` requires a validated `ROOT_CAUSE_CONFIRMED` artifact and enters `ROOT_CAUSE_CONFIRMED`.
 4. `FAIL` requires a validated `BLOCKED` artifact and enters `DIAGNOSIS_BLOCKED`.
 5. After new evidence and explicit human approval, call `BeginDiagnosticIteration` before another analysis. Each recorded diagnosis consumes one of the persisted one-to-three iterations.

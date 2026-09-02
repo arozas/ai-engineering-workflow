@@ -12,10 +12,10 @@ permissions:
 jobs:
   validate:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Validate distribution contracts
         shell: pwsh
@@ -24,3 +24,11 @@ jobs:
       - name: Run isolated workflow tests
         shell: pwsh
         run: ./tests/Run-Tests.ps1
+
+      - name: Install current OpenCode CLI
+        shell: pwsh
+        run: npm install --global opencode-ai@latest
+
+      - name: Smoke-test OpenCode discovery
+        shell: pwsh
+        run: ./scripts/smoke-opencode.ps1
