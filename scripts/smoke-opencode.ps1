@@ -72,6 +72,44 @@ function Get-DefinitionNames([object[]]$Definitions) {
     )
 }
 
+function Get-TextFileContent {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        return (Get-Content -LiteralPath $Path -Raw)
+    }
+    return ''
+}
+
+function Get-OpenCodeServerFailureDetails {
+    param([Parameter(Mandatory = $true)][System.Diagnostics.Process]$ServerProcess)
+
+    $exitStatus = if ($ServerProcess.HasExited) { "exited with code $($ServerProcess.ExitCode)" } else { 'still running' }
+    $stdout = (Get-TextFileContent -Path $stdoutPath).Trim()
+    $stderr = (Get-TextFileContent -Path $stderrPath).Trim()
+    return "Process: $exitStatus. Stdout: $stdout Stderr: $stderr"
+}
+
+function Invoke-OpenCodeEndpoint {
+    param(
+        [Parameter(Mandatory = $true)][string]$BaseUrl,
+        [Parameter(Mandatory = $true)][string[]]$Paths,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    $errors = @()
+    foreach ($path in $Paths) {
+        try {
+            return Invoke-RestMethod -Uri "$BaseUrl$path" -TimeoutSec 10
+        }
+        catch {
+            $errors += "${path}: $($_.Exception.Message)"
+        }
+    }
+
+    throw "Unable to load OpenCode $Description. Tried: $($errors -join '; ')"
+}
+
 function Start-OpenCodeServer {
     param(
         [Parameter(Mandatory = $true)][string]$CommandSource,
@@ -193,22 +231,26 @@ try {
     $baseUrl = "http://127.0.0.1:$port"
     $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     $healthy = $false
+    $healthPaths = @('/api/health', '/global/health')
     while ([DateTime]::UtcNow -lt $deadline) {
         if ($process.HasExited) { break }
-        try {
-            $health = Invoke-RestMethod -Uri "$baseUrl/global/health" -TimeoutSec 2
-            if ($health.healthy -eq $true) { $healthy = $true; break }
+        foreach ($healthPath in $healthPaths) {
+            try {
+                $health = Invoke-RestMethod -Uri "$baseUrl$healthPath" -TimeoutSec 2
+                if ($health.healthy -eq $true) { $healthy = $true; break }
+            }
+            catch { }
         }
-        catch { Start-Sleep -Milliseconds 500 }
+        if ($healthy) { break }
+        Start-Sleep -Milliseconds 500
     }
     if (-not $healthy) {
-        $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { '' }
-        throw "OpenCode server did not become healthy. $stderr"
+        throw "OpenCode server did not become healthy. $(Get-OpenCodeServerFailureDetails -ServerProcess $process)"
     }
 
-    $agents = @(Invoke-RestMethod -Uri "$baseUrl/agent" -TimeoutSec 10)
-    $commands = @(Invoke-RestMethod -Uri "$baseUrl/command" -TimeoutSec 10)
-    $toolIds = @(Invoke-RestMethod -Uri "$baseUrl/experimental/tool/ids" -TimeoutSec 10)
+    $agents = @(Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/agent', '/api/agent') -Description 'agents')
+    $commands = @(Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/command', '/api/command') -Description 'commands')
+    $toolIds = @(Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/experimental/tool/ids', '/api/experimental/tool/ids') -Description 'typed tool IDs')
     $agentNames = Get-DefinitionNames -Definitions $agents
     $commandNames = Get-DefinitionNames -Definitions $commands
 

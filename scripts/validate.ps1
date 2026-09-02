@@ -271,7 +271,7 @@ if ($installOutputContent -match '(?m)^.*opencode2.*$') {
     $errors += 'Onboarding scripts must invoke the official opencode executable name.'
 }
 $openCodeSmokeContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\smoke-opencode.ps1') -Raw
-foreach ($smokeToken in @('opencode2', '/global/health', '/agent', '/command', '/experimental/tool/ids', 'workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate')) {
+foreach ($smokeToken in @('opencode2', '/api/health', '/global/health', '/agent', '/command', '/experimental/tool/ids', 'workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate')) {
     if ($openCodeSmokeContent -notmatch [regex]::Escape($smokeToken)) {
         $errors += "OpenCode smoke test is missing discovery check: $smokeToken."
     }
