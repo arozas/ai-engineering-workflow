@@ -556,6 +556,9 @@ exit 0
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\summarize-evaluations.ps1') -Arguments @('-InputPath', $benchmarkPath, '-OutputPath', $benchmarkSummaryPath) | Out-Null
     Assert-True -Condition ((Get-Content -LiteralPath $benchmarkSummaryPath -Raw) -match '50% savings') -Message 'Benchmark tooling validates and compares recorded token usage.'
 
+    $smokeSelfTestOutput = Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\smoke-opencode.ps1') -Arguments @('-SelfTest')
+    Assert-True -Condition (($smokeSelfTestOutput -join "`n") -match 'OpenCode smoke helper self-test passed: 4 assertions\.') -Message 'OpenCode smoke helper parsers are covered without starting the beta runtime.'
+
     Add-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\developer.md') -Value "`nlocal customization"
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\update.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-DryRun') -ExpectedExitCode 1 | Out-Null
     Assert-True -Condition $true -Message 'Updater rejects a locally modified managed agent.'

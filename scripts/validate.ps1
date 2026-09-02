@@ -39,6 +39,7 @@ foreach ($required in @(
     '.github\workflows\validate.yml',
     'evaluations\benchmark.schema.json',
     'evaluations\README.md',
+    'evaluations\benchmark-suite-playbook.md',
     'template\AGENTS.md',
     'template\opencode.json',
     'template\.ai\project.schema.json',
@@ -275,10 +276,13 @@ foreach ($onboardingScript in @('scripts\install.ps1', 'scripts\new-project.ps1'
     }
 }
 $openCodeSmokeContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\smoke-opencode.ps1') -Raw
-foreach ($smokeToken in @('opencode2', '/api/health', '/global/health', '/api/agent', '/api/command', '/api/experimental/tool/ids', 'directory=', 'Authorization', '<redacted>', 'workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate')) {
+foreach ($smokeToken in @('opencode2', 'AllowLegacyOpenCodeFallback', 'SelfTest', 'OpenCode smoke helper self-test passed', '/api/health', '/global/health', '/api/agent', '/api/command', '/api/experimental/tool/ids', 'directory=', 'Authorization', '<redacted>', 'workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate')) {
     if ($openCodeSmokeContent -notmatch [regex]::Escape($smokeToken)) {
         $errors += "OpenCode smoke test is missing discovery check: $smokeToken."
     }
+}
+if ($openCodeSmokeContent -match [regex]::Escape("foreach (`$commandName in @('opencode2', 'opencode'))")) {
+    $errors += 'OpenCode smoke test must not fall back to the V1 opencode executable by default.'
 }
 $ciContent = Get-Content -LiteralPath (Join-Path $workflowRoot '.github\workflows\validate.yml') -Raw
 foreach ($ciToken in @('Validate distribution contracts', 'Run isolated workflow tests')) {

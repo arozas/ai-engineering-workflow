@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
-    [ValidateRange(10, 180)][int]$StartupTimeoutSeconds = 90
+    [ValidateRange(10, 180)][int]$StartupTimeoutSeconds = 90,
+    [switch]$AllowLegacyOpenCodeFallback,
+    [switch]$SelfTest
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,15 +31,22 @@ $environmentNames = @(
 $previousEnvironment = @{}
 
 function Resolve-OpenCodeCommandSource {
+    param([bool]$AllowLegacyFallback = $false)
+
     $commands = @()
-    foreach ($commandName in @('opencode2', 'opencode')) {
+    $commandNames = if ($AllowLegacyFallback) { @('opencode2', 'opencode') } else { @('opencode2') }
+    foreach ($commandName in $commandNames) {
         $commands += @(Get-Command $commandName -All -ErrorAction SilentlyContinue)
     }
-    if (@($commands).Count -eq 0) { throw 'OpenCode CLI was not found. Install @opencode-ai/cli@beta before running the smoke test.' }
+    if (@($commands).Count -eq 0) {
+        throw 'OpenCode V2 CLI was not found. Install @opencode-ai/cli@beta and verify opencode2 --version before running the smoke test.'
+    }
 
     foreach ($command in $commands) {
         $source = [string]$command.Source
         if ([string]::IsNullOrWhiteSpace($source)) { continue }
+        $commandName = [string]$command.Name
+        if (-not $AllowLegacyFallback -and $commandName -ne 'opencode2') { continue }
 
         $extension = [IO.Path]::GetExtension($source)
         if ($isWindowsPlatform -and [string]::IsNullOrEmpty($extension)) {
@@ -52,6 +61,35 @@ function Resolve-OpenCodeCommandSource {
     }
 
     throw 'OpenCode CLI was found, but no executable Windows shim could be resolved.'
+}
+
+function Assert-SmokeSelfTest {
+    param([bool]$Condition, [string]$Message)
+
+    if (-not $Condition) { throw "SMOKE SELF-TEST FAILED: $Message" }
+    $script:selfTestPassed++
+}
+
+function Invoke-SmokeSelfTest {
+    $script:selfTestPassed = 0
+
+    $nestedDefinitions = [ordered]@{
+        data = @(
+            [pscustomobject]@{ name = 'orchestrator'; description = 'primary' },
+            [pscustomobject]@{ id = 'workflow_state' },
+            [ordered]@{ 'ticket' = [pscustomobject]@{ name = 'ticket' } }
+        )
+    }
+    $names = @(Get-DefinitionNames -Definitions $nestedDefinitions)
+    Assert-SmokeSelfTest -Condition ($names -contains 'orchestrator' -and $names -contains 'workflow_state' -and $names -contains 'ticket') -Message 'Definition-name extraction handles nested dictionaries, name fields, and id fields.'
+
+    $redacted = Hide-OpenCodeServerPassword -Value "server password secret-value`nother output"
+    Assert-SmokeSelfTest -Condition ($redacted -match 'server password <redacted>' -and $redacted -notmatch 'secret-value') -Message 'Server password redaction removes sensitive values from diagnostics.'
+
+    Assert-SmokeSelfTest -Condition ((Format-DiscoveredNames -Names @()) -eq '<none>') -Message 'Empty discovery lists render explicitly.'
+    Assert-SmokeSelfTest -Condition ((Format-DiscoveredNames -Names @('b', '', 'a')) -eq 'b, a') -Message 'Discovery formatting removes empty values without inventing names.'
+
+    Write-Host "OpenCode smoke helper self-test passed: $script:selfTestPassed assertions."
 }
 
 function Get-FreeTcpPort {
@@ -276,7 +314,12 @@ function Remove-SmokeTestRoot {
 }
 
 try {
-    $opencodeCommandSource = Resolve-OpenCodeCommandSource
+    if ($SelfTest) {
+        Invoke-SmokeSelfTest
+        return
+    }
+
+    $opencodeCommandSource = Resolve-OpenCodeCommandSource -AllowLegacyFallback:$AllowLegacyOpenCodeFallback.IsPresent
 
     New-Item -ItemType Directory -Path $consumerRoot -Force | Out-Null
     & git -C $consumerRoot init -b main | Out-Null

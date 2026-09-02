@@ -136,7 +136,7 @@ opencode2 --version
 pwsh -NoProfile -File .\scripts\smoke-opencode.ps1
 ```
 
-The smoke test creates a temporary consumer repository, installs Local mode, starts the V2 executable on loopback without a model call, and queries the documented health, agent, command, and tool-ID endpoints. It prefers `opencode2` because the template uses OpenCode V2 permissions; falling back to the V1 `opencode` executable will reject `template/opencode.json`. It fails when an agent or command cannot be discovered, either reviewer-specific tool is missing, another typed TypeScript tool cannot load, or the server cannot parse the installed configuration.
+The smoke test creates a temporary consumer repository, installs Local mode, starts the V2 executable on loopback without a model call, and queries the documented health, agent, command, and tool-ID endpoints. It requires `opencode2` by default because the template uses OpenCode V2 permissions. Use `-AllowLegacyOpenCodeFallback` only for local compatibility investigation; falling back to the V1 `opencode` executable is expected to reject `template/opencode.json`. The smoke test fails when an agent or command cannot be discovered, either reviewer-specific tool is missing, another typed TypeScript tool cannot load, or the server cannot parse the installed configuration.
 
 CI has one required lane. The `validate` job runs only deterministic checks: static distribution validation and the isolated PowerShell test suite. Keep `scripts/smoke-opencode.ps1` as a manual compatibility check while OpenCode V2 is beta; it should inform maintenance work, not block known-good workflow changes.
 

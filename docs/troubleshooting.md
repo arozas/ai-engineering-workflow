@@ -163,7 +163,9 @@ The workflow uses the current Node 24-based checkout action. If a runtime deprec
 
 ## OpenCode smoke discovery fails
 
-Run `opencode2 --version`, then execute `scripts/smoke-opencode.ps1` locally. The test does not call a model; it verifies the local server health and discovery endpoints, including both reviewer-specific tools. The script prefers `opencode2` because this template uses OpenCode V2 permissions. If the server reports that V2 permissions are unsupported, the V1 `opencode` executable was selected or `opencode2` is missing from PATH. Other failures usually mean the installed OpenCode version cannot parse `opencode.json`, one Markdown definition has invalid frontmatter, `.opencode/tools/workflow.ts` cannot load, or the current OpenCode V2 beta changed its headless API behavior. This smoke test is intentionally manual while V2 is beta so runtime drift does not invalidate deterministic workflow changes.
+Run `opencode2 --version`, then execute `scripts/smoke-opencode.ps1` locally. The test does not call a model; it verifies the local server health and discovery endpoints, including both reviewer-specific tools. The script is V2-only by default because this template uses OpenCode V2 permissions. If `opencode2` is missing from `PATH`, install the current V2 CLI or fix the terminal environment before retrying. Other failures usually mean the installed OpenCode version cannot parse `opencode.json`, one Markdown definition has invalid frontmatter, `.opencode/tools/workflow.ts` cannot load, or the current OpenCode V2 beta changed its headless API behavior. This smoke test is intentionally manual while V2 is beta so runtime drift does not invalidate deterministic workflow changes.
+
+Use `-AllowLegacyOpenCodeFallback` only for local compatibility investigation. The fallback may select the V1 `opencode` executable and is expected to reject this workflow's V2 permissions.
 
 ## Collecting useful support evidence
 
