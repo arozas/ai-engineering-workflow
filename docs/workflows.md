@@ -1,0 +1,123 @@
+# Operating workflows
+
+## Choosing the route
+
+Use the smallest route that is valid for the risk and uncertainty.
+
+| Situation | Route |
+| --- | --- |
+| New feature, broad bug, cross-module work, dependency, public contract, migration, security, concurrency, data integrity, CI/CD, or infrastructure | `/ticket` standard workflow |
+| Known-cause bug in one module, no more than three files and 120 changed lines, deterministic regression verification, no prohibited risk | `/quick-fix` |
+| Bounded documentation, local configuration, or mechanical change with the same limits | `/small-task` |
+| Production symptom with unknown cause | `/diagnose` |
+| Already confirmed diagnostic run | `/ticket diagnosis:<run-id>` |
+
+Urgency never changes the route. An unknown one-line production bug is still a diagnosis problem. A large generated change is not a fast-path task even when its conceptual edit is simple.
+
+## Standard workflow
+
+### Analyze
+
+Run `/ticket <ticket, specification, or requirement>`. The orchestrator normalizes the input into a persisted requirement, loads project context for affected modules, gathers bounded evidence, and proposes:
+
+- observable acceptance criteria;
+- evidence and confidence;
+- affected module IDs, files, and expected diff budget;
+- explicit non-goals;
+- implementation steps and design decisions;
+- success, boundary, failure, authorization, and regression scenarios;
+- exact configured quality commands;
+- risks and unresolved questions.
+
+No production code changes during planning.
+
+### Approve
+
+Correct the proposal or explicitly approve it. Approval persists the exact plan and affected module IDs. State hashes the current `.ai/project.json` and the complete phase/command matrix for those modules.
+
+Changing module selection later requires a new approved plan. Conversation history alone is not approval.
+
+### Implement and test
+
+Run `/implement` or request the full workflow. The orchestrator validates the run and sends the canonical requirement, plan, constraints, diff budget, and selected module context to the developer.
+
+The developer stops with `PLAN INVALIDATED` if repository evidence contradicts the plan. It cannot add dependencies, change public contracts, alter migrations or CI/CD, or expand a refactor without approval.
+
+The tester may add focused tests only in established test locations. If testing requires a production design change, it reports `TESTABILITY ISSUE`.
+
+### Gate
+
+`workflow_gate` receives the run ID. It obtains the module list from state, verifies project and matrix hashes, and executes phases in this fixed order:
+
+1. `restore`
+2. `build`
+3. `lint`
+4. `typecheck`
+5. `test`
+6. `e2e`
+
+Array order within a phase is preserved. An empty phase is `NOT CONFIGURED`. The first failure normally stops that module and later commands become `NOT RUN`. A module with no configured commands is incomplete, not passing.
+
+The runner writes `.ai/runtime/gates.json`. State independently validates the run ID, module identities and paths, phases and commands, hashes, exit-derived status, and worktree stability before accepting it.
+
+### Review
+
+The orchestrator constructs an exact packet from the requirement, plan, diff, and gates. The reviewer receives it without shell or edit access and reports findings by severity.
+
+A `BLOCKER` or `HIGH` finding requires an approved correction, a full gate rerun, and another review. Project policy limits correction cycles to one through three. Exhausting the limit requires human intervention.
+
+### Prepare delivery
+
+`READY_FOR_DELIVERY` means the exact current diff has passing deterministic gates and review without high-severity findings. It does not authorize commit, push, merge, or deployment.
+
+## Fast path
+
+`/quick-fix` and `/small-task` use the `quick-fix` primary agent to reduce repeated context. Hard ceilings are:
+
+- one affected module for a quick fix; zero or one for a small task;
+- no more than three files and 120 added plus deleted lines;
+- clear acceptance criteria and deterministic verification;
+- no public contract, dependency, migration, generated code, CI/CD, infrastructure, deployment, security, secret, data-integrity, concurrency, or cross-module impact;
+- no more than one correction cycle.
+
+Project configuration may lower these limits but cannot raise them.
+
+Before editing, the agent runs `workflow_fast_path` in `Estimate` mode and presents a compact micro-plan with exact paths, line estimate, verification, risk flags, evidence, and non-goals. One explicit approval authorizes only that scope.
+
+After implementation, it runs the frozen quality matrix and `workflow_fast_path` in `Actual` mode. Actual mode derives files, line counts, module mapping, untracked files, binary uncertainty, and conservative path risks from Git. Expansion returns `FAST PATH INVALIDATED`.
+
+The quick reviewer receives only the requirement, approved micro-plan, exact diff, gate results, and classifier output. A failed second review after the single correction allowance escalates to `/ticket`.
+
+## Production diagnosis
+
+Run `/diagnose <sanitized incident description>`. Diagnosis is read-only and separates causal discovery from implementation. Only repository-evidenced local commands configured in `.ai/project.json` are allowed. It never connects to production, retrieves secrets, deploys, rolls back, restarts services, repairs data, or mutates infrastructure.
+
+The diagnostic artifact contains impact, sanitized evidence IDs, competing falsifiable hypotheses, reproduction status, a confirmed evidence-backed root cause or explicit missing evidence, a regression-test obligation, bounded mitigation options, and safety assertions.
+
+Outcomes:
+
+- `ROOT_CAUSE_CONFIRMED`: exactly one supported hypothesis and regression test.
+- `BLOCKED`: insufficient evidence and an exact missing-evidence list.
+- `ESCALATED`: safe local diagnosis cannot continue.
+
+Iterations are persisted and capped at three. A confirmed diagnosis starts implementation only through `/ticket diagnosis:<run-id>`; the new standard run records and validates that source.
+
+## Guarded delivery
+
+Delivery is split into single operations:
+
+1. `/delivery-check` evaluates readiness without mutation.
+2. `/branch` proposes one local feature branch.
+3. `/commit` proposes exact staged paths and a Conventional Commit.
+4. `/publish` proposes a normal feature-branch push.
+5. `/pr-create` proposes a draft PR with explicit base and head.
+
+Each operation requires a fresh proposal, revalidation, and approval. Approval does not carry forward. The delivery agent stops after one operation and records evidence.
+
+Commits stage exact paths only; broad staging, amend, and AI authorship trailers are forbidden. Publishing never force-pushes, pushes tags, deletes refs, or publishes a protected/shared branch. PR creation does not add reviewers, labels, assignees, comments, merge, or auto-merge.
+
+Merge, rebase, reset, release, deployment, secret mutation, and cloud mutation remain outside the workflow.
+
+## Resuming work
+
+Use `/run-status <run-id>`. It validates artifact hashes and shows status, route, source diagnosis, Git state, quality plan, correction usage, and next legal action. If multiple nonterminal runs exist, commands require an exact ID and never guess.

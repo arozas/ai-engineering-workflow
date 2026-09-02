@@ -12,7 +12,7 @@ Before proposing a commit, push, or draft PR mutation, require:
 2. Actual changes within the approved scope and diff budget.
 3. Fresh deterministic quality-gate evidence with overall PASS.
 4. An independent review verdict with no BLOCKER or HIGH findings.
-5. A delivery check captured from `.ai/scripts/delivery-check.ps1`.
+5. A delivery check captured from the typed `workflow_delivery_check` tool.
 6. No protected environment files, secrets, unrelated files, or unapproved generated artifacts.
 
 If any precondition is missing, report `DELIVERY NOT READY` and do not mutate Git or GitHub state.

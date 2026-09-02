@@ -6,7 +6,7 @@ compatibility: opencode-v2
 
 # Fast path
 
-Use this skill only for `/quick-fix` and `/small-task`. It reduces model context and handoffs without weakening repository safety. Fast path eligibility is a claim that must be supported by repository evidence and confirmed by the deterministic `.ai/scripts/fast-path-check.ps1` policy evaluator.
+Use this skill only for `/quick-fix` and `/small-task`. It reduces model context and handoffs without weakening repository safety. Fast path eligibility is a claim that must be supported by repository evidence and confirmed by the deterministic `workflow_fast_path` policy tool.
 
 ## Non-negotiable limits
 
@@ -50,7 +50,7 @@ Before proposing an edit:
 3. Define observable acceptance criteria and exact deterministic verification.
 4. Estimate exact files and added-plus-deleted lines.
 5. Evaluate every risk flag explicitly.
-6. Run `.ai/scripts/fast-path-check.ps1` with `-Phase Estimate`, configured maximums, and truthful arguments derived from the evidence.
+6. Run `workflow_fast_path` with phase `Estimate`, configured maximums, and truthful arguments derived from the evidence.
 7. If the production root cause remains unknown, stop without editing and direct the user to `/diagnose`. If the evaluator returns `ESCALATE_STANDARD` for another reason or cannot run, direct the user to `/ticket`.
 
 Estimate classification is deterministic for declared evidence. Semantic risks still require honest judgment, so cite evidence for every false flag.
@@ -80,7 +80,7 @@ Run the exact configured quality gates for the affected module. For a module-fre
 After implementation:
 
 1. Re-evaluate semantic risk flags against the real diff.
-2. Run `.ai/scripts/fast-path-check.ps1` with `-Phase Actual -BaseRef <persisted-base-sha>` and the semantic flags. Do not pass file, line, or module counts: the script derives them from Git, maps paths to configured modules, loads project limits, and detects conservative path risks.
+2. Run `workflow_fast_path` with phase `Actual`, the persisted base SHA, and the semantic flags. Do not pass file, line, or module counts: the tool derives them from Git, maps paths to configured modules, loads project limits, and detects conservative path risks.
 3. Compare the derived changed-file list with the approved micro-plan.
 4. If actual scope is ineligible, stop with `FAST PATH INVALIDATED`; do not continue modifying code.
 5. Build the exact diff packet and delegate it to `quick-reviewer`, which has no shell access.

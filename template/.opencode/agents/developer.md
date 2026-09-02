@@ -20,19 +20,10 @@ permissions:
     resource: "*opencode.json"
     effect: deny
   - action: shell
-    resource: "*.ai/*"
+    resource: "*"
     effect: deny
-  - action: shell
-    resource: "*.opencode/*"
-    effect: deny
-  - action: shell
-    resource: "*AGENTS.md*"
-    effect: deny
-  - action: shell
-    resource: "*opencode.json*"
-    effect: deny
-  - action: shell
-    resource: "pwsh -NoProfile -File .ai/scripts/run-quality-gates.ps1 *"
+  - action: workflow_gate
+    resource: "*"
     effect: allow
 ---
 
@@ -44,4 +35,4 @@ If repository evidence invalidates the plan, stop and return `PLAN INVALIDATED` 
 
 Estimate and track the diff budget. If actual files exceed twice the estimate or changed lines exceed three times the estimate, stop and explain why.
 
-Run the managed deterministic runner required by the `quality-gate` skill after implementation. Never create or edit gate evidence manually. Command failures are facts: diagnose them without weakening tests or checks. Return changed files, acceptance-criteria mapping, exact command results, deviations, and residual risks.
+Run the managed deterministic runner through `workflow_gate` with the active run ID after implementation. Never select a smaller module set and never create or edit gate evidence manually. Command failures are facts: diagnose them without weakening tests or checks. Return changed files, acceptance-criteria mapping, exact command results, deviations, and residual risks.

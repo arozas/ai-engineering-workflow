@@ -5,7 +5,7 @@ agent: orchestrator
 
 Perform the mandatory fast path before loading any skill:
 
-1. Run `.ai/scripts/profile-project.ps1` without an output path. This is the one permitted application inventory and remains read-only.
+1. Run `workflow_profile_project` with `persist: false`. This is the one permitted application inventory and remains read-only.
 2. If it returns `NO PROJECT MODULES DETECTED`, repeat that verdict, explain that application source or build evidence is required, and stop in the same response. Do not load a skill, run per-language searches, or continue exploring.
 3. If application files exist, retain the returned profile, load `repo-bootstrap`, `project-profiler`, and `project-skill-builder`, and reuse that evidence without another inventory.
 

@@ -59,7 +59,7 @@ For an applicable repository, present:
 10. Exploration ledger summary and deterministic structure fingerprint.
 11. A `diagnostics` policy. Default to three hypothesis iterations, no mandatory reproduction, and no commands unless repository evidence establishes safe local inspection or reproduction commands.
 
-Wait for explicit approval. On approval, rerun `.ai/scripts/profile-project.ps1 -OutputPath .ai/project-profile.json`; stop if its fingerprint differs from the approved proposal. Then write only the approved `.ai/project.json`, `.ai/project-rules.md`, `.ai/generated-skills.json`, and approved project skill files. Run `.ai/scripts/validate-project.ps1` and report `PROJECT_VALID` before summarizing corrections made by the user. A failed deterministic validation blocks bootstrap completion.
+Wait for explicit approval. On approval, rerun `workflow_profile_project` with `persist: true`; stop if its fingerprint differs from the approved proposal. Then write only the approved `.ai/project.json`, `.ai/project-rules.md`, `.ai/generated-skills.json`, and approved project skill files. Run `workflow_validate_project` and report `PROJECT_VALID` before summarizing corrections made by the user. A failed deterministic validation blocks bootstrap completion.
 
 Unless the user selects stricter limits, propose the schema defaults for `fastPath`: enabled, at most three files, at most 120 added-plus-deleted lines, at most two production and two test files during diagnosis, and exactly one correction iteration. Never propose values above the schema maxima.
 

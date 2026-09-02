@@ -26,6 +26,15 @@ foreach ($required in @(
     'scripts\update.ps1',
     'scripts\summarize-evaluations.ps1',
     'tests\Run-Tests.ps1',
+    'docs\README.md',
+    'docs\architecture.md',
+    'docs\installation.md',
+    'docs\workflows.md',
+    'docs\project-context.md',
+    'docs\security.md',
+    'docs\models-and-efficiency.md',
+    'docs\extending-and-validation.md',
+    'docs\troubleshooting.md',
     '.github\workflows\validate.yml',
     'evaluations\benchmark.schema.json',
     'evaluations\README.md',
@@ -55,6 +64,7 @@ foreach ($required in @(
     'template\.opencode\agents\quick-reviewer.md',
     'template\.opencode\agents\delivery.md',
     'template\.opencode\agents\diagnostician.md',
+    'template\.opencode\tools\workflow.ts',
     'template\.opencode\commands\ai-bootstrap.md',
     'template\.opencode\commands\quick-fix.md',
     'template\.opencode\commands\small-task.md',
@@ -114,12 +124,13 @@ try {
 catch { $errors += "Workflow manifest schema validation failed: $($_.Exception.Message)" }
 
 $openCodeConfigContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\opencode.json') -Raw
-if ($openCodeConfigContent -notmatch [regex]::Escape('pwsh -NoProfile -File .ai/scripts/fast-path-check.ps1 *')) {
-    $errors += 'opencode.json must allow the deterministic fast-path classifier.'
+if ($openCodeConfigContent -notmatch [regex]::Escape('"action": "workflow_*", "resource": "*", "effect": "deny"')) {
+    $errors += 'opencode.json must deny custom workflow tools by default.'
 }
-foreach ($managedScript in @('validate-project.ps1', 'workflow-state.ps1', 'profile-project.ps1', 'validate-diagnosis.ps1', 'run-quality-gates.ps1')) {
-    if ($openCodeConfigContent -notmatch [regex]::Escape("pwsh -NoProfile -File .ai/scripts/$managedScript *")) {
-        $errors += "opencode.json must allow managed script $managedScript."
+foreach ($managedScript in @('delivery-check.ps1', 'fast-path-check.ps1', 'validate-project.ps1', 'workflow-state.ps1', 'profile-project.ps1', 'validate-diagnosis.ps1', 'run-quality-gates.ps1')) {
+    $unsafePattern = '(?m)"action":\s*"shell"[^\r\n]*' + [regex]::Escape($managedScript) + '[^\r\n]*"effect":\s*"allow"'
+    if ($openCodeConfigContent -match $unsafePattern) {
+        $errors += "opencode.json must not automatically allow managed script $managedScript through a raw shell pattern."
     }
 }
 foreach ($sensitivePattern in @('*.npmrc', '*.pypirc', '*.pem', '*.key', '*credentials*.json', '*secrets*.json')) {
@@ -130,6 +141,7 @@ foreach ($sensitivePattern in @('*.npmrc', '*.pypirc', '*.pem', '*.key', '*crede
 $quickFixAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\quick-fix.md') -Raw
 $developerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\developer.md') -Raw
 $quickReviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\quick-reviewer.md') -Raw
+$orchestratorAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\orchestrator.md') -Raw
 if ($quickFixAgentContent -notmatch '(?m)^steps:\s*16\s*$') {
     $errors += 'quick-fix agent must keep its bounded 16-step budget.'
 }
@@ -150,17 +162,49 @@ foreach ($agentDefinition in @{
 if ($quickFixAgentContent -notmatch '(?ms)- action:\s*edit\s+resource:\s*"\.ai/runtime/gates\.json"\s+effect:\s*deny') {
     $errors += 'quick-fix must not write deterministic gate evidence directly.'
 }
+$typedToolContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\tools\workflow.ts') -Raw
+foreach ($toolExport in @('state', 'gate', 'fast_path', 'validate_project', 'profile_project', 'validate_diagnosis', 'delivery_check')) {
+    if ($typedToolContent -notmatch [regex]::Escape("export const $toolExport = tool")) {
+        $errors += "Typed workflow tool is missing export: $toolExport."
+    }
+}
+if ($typedToolContent -notmatch [regex]::Escape('Bun.spawn(["pwsh", "-NoProfile", "-File", scriptPath, ...args]') -or
+    $typedToolContent -match '(?m)Bun\.spawn\(`') {
+    $errors += 'Typed workflow tools must invoke PowerShell with an argument vector, never an interpolated shell string.'
+}
+foreach ($agentToolRequirement in @{
+    'orchestrator workflow_state' = @($orchestratorAgentContent, 'workflow_state')
+    'orchestrator workflow_gate' = @($orchestratorAgentContent, 'workflow_gate')
+    'developer workflow_gate' = @($developerAgentContent, 'workflow_gate')
+    'quick-fix workflow_fast_path' = @($quickFixAgentContent, 'workflow_fast_path')
+    'quick-fix workflow_state' = @($quickFixAgentContent, 'workflow_state')
+}.GetEnumerator()) {
+    $content = $agentToolRequirement.Value[0]
+    $action = $agentToolRequirement.Value[1]
+    if ($content -notmatch ('(?ms)- action:\s*' + [regex]::Escape($action) + '\s+resource:\s*"\*"\s+effect:\s*allow')) {
+        $errors += "$($agentToolRequirement.Key) must be explicitly allowed."
+    }
+}
 $qualityRunnerContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\run-quality-gates.ps1') -Raw
 $workflowStateContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\workflow-state.ps1') -Raw
-foreach ($requiredRunnerToken in @('quality-gates.schema.json', 'startedWorktreeFingerprint', 'runnerSha256', 'configuredCommandCount')) {
+foreach ($requiredRunnerToken in @('quality-gates.schema.json', 'startedWorktreeFingerprint', 'runnerSha256', 'configuredCommandCount', 'qualityPlanSha256', 'workflow-run.schema.json', 'RunId')) {
     if ($qualityRunnerContent -notmatch [regex]::Escape($requiredRunnerToken)) {
         $errors += "Quality-gate runner is missing deterministic evidence field or check: $requiredRunnerToken."
     }
 }
-foreach ($requiredStateToken in @('Get-ValidatedGateEvidence', 'Get-ControlPlaneFingerprint', 'Assert-ControlPlane')) {
+$runnerPreamble = $qualityRunnerContent.Substring(0, $qualityRunnerContent.IndexOf('function '))
+if ($runnerPreamble -match '\$ModuleId') {
+    $errors += 'Quality-gate runner must derive modules from persisted run state, not caller-selected ModuleId input.'
+}
+foreach ($requiredStateToken in @('Get-ValidatedGateEvidence', 'Get-ControlPlaneFingerprint', 'Assert-ControlPlane', 'affectedModuleIds', 'matrixSha256', 'Quality-gate command mismatch')) {
     if ($workflowStateContent -notmatch [regex]::Escape($requiredStateToken)) {
         $errors += "Workflow state is missing deterministic protection: $requiredStateToken."
     }
+}
+
+$readmePath = Join-Path $workflowRoot 'README.md'
+if ((Get-Content -LiteralPath $readmePath).Count -gt 350) {
+    $errors += 'README.md must remain a concise entry point; detailed guidance belongs under docs/.'
 }
 $reviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\reviewer.md') -Raw
 $diagnosticianAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\diagnostician.md') -Raw

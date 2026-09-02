@@ -14,13 +14,13 @@ Use a lowercase run ID of 3-64 characters, for example `ticket-18427` or `quick-
 
 ## Required transitions
 
-Use only `.ai/scripts/workflow-state.ps1`:
+Use only the typed `workflow_state` tool:
 
 1. Write the normalized request to `.ai/runtime/requirement.md`, then `Start` with `standard` or `fast-path`.
 2. Write the complete proposed plan to `.ai/runtime/plan.md`.
-3. Only after explicit user approval, call `ApprovePlan` with that exact file. The script copies and hashes it.
+3. Only after explicit user approval, call `ApprovePlan` with that exact file and every affected module ID. The script copies and hashes the plan and freezes the exact project and quality-command matrix.
 4. Call `BeginImplementation` before production or test edits.
-5. Write factual gate evidence to `.ai/runtime/gates.json`, then call `RecordGates` with `PASS` or `FAIL`.
+5. Run `workflow_gate` with the run ID. It writes factual gate evidence to `.ai/runtime/gates.json`; then call `RecordGates` with `PASS` or `FAIL`.
 6. Pass the exact persisted requirement, plan, diff packet, and gates to the read-only reviewer. Write its returned result to `.ai/runtime/review.md`, then call `RecordReview`.
 7. Use `BeginCorrection` before an approved correction. The script enforces the workflow-specific limit.
 8. After an approved commit, write its evidence to `.ai/runtime/commit.json` and call `RecordCommit`; the script proves that the commit is the exact gate-reviewed diff.
@@ -41,7 +41,7 @@ Unknown production failures use a separate `diagnostic` path:
 
 Diagnostic transitions never authorize edits, implementation, production access, mitigations, or delivery.
 
-Run `Validate` before resuming or delivery. Artifact hashes, HEAD, the post-gate worktree fingerprint, and legal transitions are deterministic boundaries. Never edit `state.json` or canonical run artifacts directly. A state transition records evidence; it never replaces the user's required approval.
+Run `Validate` before resuming or delivery. Artifact hashes, the approved module/command matrix, HEAD, the post-gate worktree fingerprint, and legal transitions are deterministic boundaries. Never edit `state.json` or canonical run artifacts directly. A state transition records evidence; it never replaces the user's required approval.
 
 ## Review isolation
 

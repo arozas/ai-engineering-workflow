@@ -8,12 +8,15 @@ param(
     [ValidateLength(1, 80)][string]$TaskType,
     [ValidatePattern('^[a-z0-9][a-z0-9-]{2,63}$')][string]$SourceRunId,
     [string]$ArtifactPath,
+    [ValidateLength(1, 1000)][string]$AffectedModules,
     [ValidateSet('PASS', 'FAIL', 'ESCALATE')][string]$Verdict,
     [ValidateLength(1, 2000)][string]$Reason
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+$qualityPhaseOrder = @('restore', 'build', 'lint', 'typecheck', 'test', 'e2e')
 
 function Get-RepositoryRoot {
     $git = Get-Command git -ErrorAction SilentlyContinue
@@ -111,7 +114,55 @@ function Assert-ControlPlane([System.Collections.IDictionary]$State, [string]$Re
     }
 }
 
-function Get-ValidatedGateEvidence([string]$SourcePath, [string]$RepositoryRoot) {
+function Get-QualityPlan([string]$RepositoryRoot, [string[]]$AffectedModuleIds) {
+    $projectPath = Join-Path $RepositoryRoot '.ai\project.json'
+    $projectSchemaPath = Join-Path $RepositoryRoot '.ai\project.schema.json'
+    if (-not (Test-Path -LiteralPath $projectPath -PathType Leaf)) { throw 'Quality planning requires .ai/project.json.' }
+    if (-not (Test-Path -LiteralPath $projectSchemaPath -PathType Leaf)) { throw 'Quality planning requires .ai/project.schema.json.' }
+    $projectJson = Get-Content -LiteralPath $projectPath -Raw
+    $projectSchema = Get-Content -LiteralPath $projectSchemaPath -Raw
+    if (-not ($projectJson | Test-Json -Schema $projectSchema -ErrorAction Stop)) { throw '.ai/project.json failed schema validation.' }
+    $project = $projectJson | ConvertFrom-Json
+    $requestedIds = @(
+        $AffectedModuleIds |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique
+    )
+    if ($requestedIds.Count -eq 0) { throw 'At least one affected module is required to approve an implementation plan.' }
+
+    $availableModules = @($project.modules)
+    $availableIds = @($availableModules | ForEach-Object { [string]$_.id })
+    $missingIds = @($requestedIds | Where-Object { $availableIds -notcontains $_ })
+    if ($missingIds.Count -gt 0) { throw "Unknown affected module(s): $($missingIds -join ', ')" }
+
+    $modules = @(
+        foreach ($moduleId in $requestedIds) {
+            $module = @($availableModules | Where-Object { [string]$_.id -eq $moduleId })[0]
+            [ordered]@{
+                id = $moduleId
+                path = ([string]$module.path).Replace('\', '/')
+                phases = @(
+                    foreach ($phaseName in $script:qualityPhaseOrder) {
+                        [ordered]@{
+                            name = $phaseName
+                            commands = @($module.quality.$phaseName | ForEach-Object { [string]$_ })
+                        }
+                    }
+                )
+            }
+        }
+    )
+    $matrixJson = ([ordered]@{ modules = $modules } | ConvertTo-Json -Depth 8 -Compress)
+    return [pscustomobject]@{
+        AffectedModuleIds = $requestedIds
+        ProjectSha256 = Get-FileSha256 -Path $projectPath
+        MatrixSha256 = Get-StringSha256 -Value $matrixJson
+        Modules = $modules
+    }
+}
+
+function Get-ValidatedGateEvidence([string]$SourcePath, [string]$RepositoryRoot, [System.Collections.IDictionary]$State) {
     $expectedPath = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot '.ai\runtime\gates.json'))
     if ([IO.Path]::GetFullPath($SourcePath) -ne $expectedPath) {
         throw 'RecordGates accepts evidence only from .ai/runtime/gates.json.'
@@ -127,15 +178,55 @@ function Get-ValidatedGateEvidence([string]$SourcePath, [string]$RepositoryRoot)
     $schema = Get-Content -LiteralPath $gateSchemaPath -Raw
     if (-not ($json | Test-Json -Schema $schema -ErrorAction Stop)) { throw 'Quality-gate evidence failed schema validation.' }
     $evidence = $json | ConvertFrom-Json
-    if ([string]$evidence.projectSha256 -ne (Get-FileSha256 -Path $projectPath)) {
+    if ([string]$evidence.runId -ne [string]$State.runId) { throw 'Quality-gate evidence belongs to a different workflow run.' }
+    if (-not $State.Contains('qualityPlan') -or $null -eq $State.qualityPlan) {
+        throw 'This run has no approved quality plan. Approve a new plan with affected modules.'
+    }
+    $expectedPlan = Get-QualityPlan -RepositoryRoot $RepositoryRoot -AffectedModuleIds @($State.qualityPlan.affectedModuleIds)
+    if ([string]$State.qualityPlan.projectSha256 -ne $expectedPlan.ProjectSha256 -or
+        [string]$State.qualityPlan.matrixSha256 -ne $expectedPlan.MatrixSha256) {
+        throw 'The approved quality plan no longer matches .ai/project.json.'
+    }
+    if ([string]$evidence.projectSha256 -ne $expectedPlan.ProjectSha256) {
         throw 'Quality-gate evidence was produced from a different .ai/project.json.'
     }
     if ([string]$evidence.runnerSha256 -ne (Get-FileSha256 -Path $runnerPath)) {
         throw 'Quality-gate evidence was produced by a different runner version.'
     }
+    if ([string]$evidence.qualityPlanSha256 -ne $expectedPlan.MatrixSha256) {
+        throw 'Quality-gate evidence does not match the approved command matrix.'
+    }
 
     $derivedModuleStatuses = @()
-    foreach ($module in @($evidence.modules)) {
+    $evidenceModules = @($evidence.modules)
+    $expectedModules = @($expectedPlan.Modules)
+    if ($evidenceModules.Count -ne $expectedModules.Count) { throw 'Quality-gate evidence does not contain every affected module.' }
+    for ($moduleIndex = 0; $moduleIndex -lt $expectedModules.Count; $moduleIndex++) {
+        $module = $evidenceModules[$moduleIndex]
+        $expectedModule = $expectedModules[$moduleIndex]
+        if ([string]$module.id -ne [string]$expectedModule.id -or [string]$module.path -ne [string]$expectedModule.path) {
+            throw "Quality-gate module identity mismatch at index $moduleIndex."
+        }
+        $evidencePhases = @($module.phases)
+        $expectedPhases = @($expectedModule.phases)
+        if ($evidencePhases.Count -ne $expectedPhases.Count) { throw "Quality-gate phase count mismatch for module '$($module.id)'." }
+        for ($phaseIndex = 0; $phaseIndex -lt $expectedPhases.Count; $phaseIndex++) {
+            $evidencePhase = $evidencePhases[$phaseIndex]
+            $expectedPhase = $expectedPhases[$phaseIndex]
+            if ([string]$evidencePhase.name -ne [string]$expectedPhase.name) {
+                throw "Quality-gate phase order mismatch for module '$($module.id)'."
+            }
+            $evidenceCommands = @($evidencePhase.commands)
+            $expectedCommands = @($expectedPhase.commands)
+            if ($evidenceCommands.Count -ne $expectedCommands.Count) {
+                throw "Quality-gate command count mismatch for module '$($module.id)' phase '$($evidencePhase.name)'."
+            }
+            for ($commandIndex = 0; $commandIndex -lt $expectedCommands.Count; $commandIndex++) {
+                if ([string]$evidenceCommands[$commandIndex].command -ne [string]$expectedCommands[$commandIndex]) {
+                    throw "Quality-gate command mismatch for module '$($module.id)' phase '$($evidencePhase.name)' index $commandIndex."
+                }
+            }
+        }
         $commands = @($module.phases | ForEach-Object { @($_.commands) })
         if ([int]$module.configuredCommandCount -ne $commands.Count) {
             throw "Quality-gate command count mismatch for module '$($module.id)'."
@@ -300,6 +391,7 @@ if ($Action -eq 'Start') {
         currentSha = $sha
         worktreeFingerprint = $null
         controlPlaneFingerprint = Get-ControlPlaneFingerprint -RepositoryRoot $repositoryRoot
+        qualityPlan = $null
         correctionIterations = 0
         maximumCorrectionIterations = $maximumCorrections
         diagnosticIterations = 0
@@ -320,8 +412,15 @@ else {
             Assert-Status -State $state -Allowed @('PLANNING')
             Assert-Head -State $state -RepositoryRoot $repositoryRoot
             Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
+            if ([string]::IsNullOrWhiteSpace($AffectedModules)) { throw 'ApprovePlan requires AffectedModules as a comma-separated list.' }
+            $qualityPlan = Get-QualityPlan -RepositoryRoot $repositoryRoot -AffectedModuleIds @($AffectedModules.Split(',', [StringSplitOptions]::RemoveEmptyEntries))
             $source = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
             Add-Artifact -State $state -Name 'plan' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict 'PASS'
+            $state.qualityPlan = [ordered]@{
+                affectedModuleIds = @($qualityPlan.AffectedModuleIds)
+                projectSha256 = $qualityPlan.ProjectSha256
+                matrixSha256 = $qualityPlan.MatrixSha256
+            }
             $state.status = 'PLAN_APPROVED'
             Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath
         }
@@ -338,7 +437,7 @@ else {
             Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
             if (@('PASS', 'FAIL') -notcontains $Verdict) { throw 'RecordGates requires Verdict PASS or FAIL.' }
             $source = Resolve-InRepositoryFile -RepositoryRoot $repositoryRoot -Path $ArtifactPath
-            $gateEvidence = Get-ValidatedGateEvidence -SourcePath $source -RepositoryRoot $repositoryRoot
+            $gateEvidence = Get-ValidatedGateEvidence -SourcePath $source -RepositoryRoot $repositoryRoot -State $state
             if ($Verdict -ne [string]$gateEvidence.Verdict) {
                 throw "RecordGates verdict '$Verdict' does not match deterministic evidence '$($gateEvidence.Overall)'."
             }

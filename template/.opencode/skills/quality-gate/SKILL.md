@@ -6,13 +6,9 @@ compatibility: opencode-v2
 
 ## Source of truth
 
-Read affected modules from `.ai/project.json`, then invoke the managed runner once with the affected module IDs:
+At plan approval, `workflow_state` persists the exact affected module IDs and hashes the corresponding quality-command matrix from `.ai/project.json`. Invoke `workflow_gate` once with only the approved run ID. The caller cannot select or omit modules.
 
-```powershell
-pwsh -NoProfile -File .ai/scripts/run-quality-gates.ps1 -ModuleId <module-id>
-```
-
-For multiple modules, pass their IDs as a comma-separated value. The runner validates project configuration, executes commands exactly as configured with the module `path` as working directory, writes schema-valid evidence atomically to `.ai/runtime/gates.json`, and returns a factual exit code. Do not execute an equivalent hand-written sequence and do not create, repair, or edit `gates.json` manually.
+The runner validates the current project configuration and persisted run, rejects a stale project or matrix, executes every frozen command with the module `path` as working directory, writes schema-valid evidence atomically to `.ai/runtime/gates.json`, and returns a factual exit code. Do not execute an equivalent hand-written sequence and do not create, repair, or edit `gates.json` manually.
 
 The runner uses this fixed phase order:
 
@@ -38,4 +34,4 @@ Within each phase, preserve array order. An empty phase is `NOT CONFIGURED`, not
 
 ## Report
 
-Use the generated artifact for every command's module, phase, working directory, exact command, exit code, duration, status, stdout/stderr evidence, and truncation flag. Call `workflow-state.ps1 -Action RecordGates` with a PASS verdict only when the artifact says overall PASS; any other artifact result is recorded as FAIL. State validation checks the schema, project hash, runner hash, command-derived verdict, worktree fingerprint, and control-plane fingerprint before accepting it. LLM opinion never overrides these results.
+Use the generated artifact for every command's module, phase, working directory, exact command, exit code, duration, status, stdout/stderr evidence, and truncation flag. Call `workflow_state` action `RecordGates` with a PASS verdict only when the artifact says overall PASS; any other artifact result is recorded as FAIL. State validation checks the run ID, exact affected-module set, phase and command matrix, schema, project hash, runner hash, command-derived verdict, worktree fingerprint, and control-plane fingerprint before accepting it. LLM opinion never overrides these results.

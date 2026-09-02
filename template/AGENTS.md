@@ -12,7 +12,7 @@ Do not use urgency to route an unknown incident through `/quick-fix`. Do not imp
 
 ## Fast path
 
-Use `/quick-fix` for a bounded bug fix and `/small-task` for bounded documentation, local configuration, or mechanical work. Both commands must load `fast-path`, run `.ai/scripts/fast-path-check.ps1`, present one compact micro-plan, and wait for explicit approval before editing.
+Use `/quick-fix` for a bounded bug fix and `/small-task` for bounded documentation, local configuration, or mechanical work. Both commands must load `fast-path`, run the typed `workflow_fast_path` tool, present one compact micro-plan, and wait for explicit approval before editing.
 
 Fast-path work is limited to one module, three files, 120 added-plus-deleted lines, deterministic verification, no prohibited risk category, and at most one correction cycle. Quick-fix diagnosis may read at most two relevant production files and two relevant test files. An unclear production root cause requires `/diagnose`. Scope expansion, public contract, dependency, migration, generated code, authentication, authorization, secrets, data integrity, concurrency, CI/CD, infrastructure, deployment, cloud, or cross-module impact requires `/ticket` and the standard workflow.
 
@@ -59,7 +59,7 @@ Do not guess missing project conventions. Report uncertainty and ask for approva
 
 ## Deterministic quality policy
 
-LLM judgment never overrides command results. Quality gates must run through `.ai/scripts/run-quality-gates.ps1`; agents must never create or edit `.ai/runtime/gates.json` manually. A gate passes only when every configured command exits successfully, in the configured order, and the worktree remains unchanged during verification. Missing, skipped, or unexecuted required commands must be reported as NOT RUN, never PASS. `RecordGates` independently validates the gate schema, project and runner hashes, derived verdict, worktree fingerprint, and control-plane fingerprint.
+LLM judgment never overrides command results. Quality gates must run through the typed `workflow_gate` tool for an approved run; agents cannot select a smaller module set and must never create or edit `.ai/runtime/gates.json` manually. A gate passes only when every command in the approved module matrix exits successfully, in the configured order, and the worktree remains unchanged during verification. Missing, skipped, or unexecuted required commands must be reported as NOT RUN, never PASS. `workflow_state` independently validates the run ID, exact module and command matrix, schema, project and runner hashes, derived verdict, worktree fingerprint, and control-plane fingerprint.
 
 `AGENTS.md`, `opencode.json`, `.ai/`, and `.opencode/` form the workflow control plane. Developer and quick-fix work must not modify it. Agent permissions block direct control-plane edits, and persisted runs fingerprint the control plane so a change invalidates later gate, review, and delivery transitions. Configuration changes require a separate explicitly approved task and a new workflow run.
 

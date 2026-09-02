@@ -10,7 +10,7 @@ Personalize the installed workflow from repository evidence without making the i
 
 ## Deterministic profile
 
-Run `pwsh -NoProfile -File .ai/scripts/profile-project.ps1` without an output path during proposal. The script inventories Git-visible application files while excluding workflow-owned paths, records manifest hashes, language counts, candidate module roots, architecture directory markers, tests, CI, and convention files, then returns a schema-valid structure fingerprint.
+Run `workflow_profile_project` with `persist: false` during proposal. The typed tool inventories Git-visible application files while excluding workflow-owned paths, records manifest hashes, language counts, candidate module roots, architecture directory markers, tests, CI, and convention files, then returns a schema-valid structure fingerprint.
 
 The profile is evidence, not a conclusion. A directory named `domain` supports an architectural hypothesis but does not prove Clean Architecture or DDD. Read only the bounded representative files permitted by `repo-bootstrap` to confirm or reject each hypothesis.
 

@@ -44,6 +44,12 @@
     "currentSha": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|UNBORN)$" },
     "worktreeFingerprint": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
     "controlPlaneFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "qualityPlan": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/qualityPlan" }
+      ]
+    },
     "correctionIterations": { "type": "integer", "minimum": 0, "maximum": 3 },
     "maximumCorrectionIterations": { "type": "integer", "minimum": 1, "maximum": 3 },
     "diagnosticIterations": { "type": "integer", "minimum": 0, "maximum": 3 },
@@ -59,6 +65,21 @@
     }
   },
   "$defs": {
+    "qualityPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["affectedModuleIds", "projectSha256", "matrixSha256"],
+      "properties": {
+        "affectedModuleIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+        },
+        "projectSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "matrixSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
     "artifact": {
       "type": "object",
       "additionalProperties": false,

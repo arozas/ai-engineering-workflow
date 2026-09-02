@@ -1,0 +1,90 @@
+# Security and trust model
+
+## Objectives
+
+The workflow prevents an agent from converting a plausible narrative into unauthorized application or delivery state through defense in depth:
+
+- least-privilege permissions;
+- explicit human approvals;
+- typed tools for automatically allowed deterministic operations;
+- persisted state and artifact hashes;
+- control-plane and worktree fingerprints;
+- an exact approved quality matrix;
+- independent read-only review;
+- separately approved delivery operations;
+- default denial of secrets, external directories, destructive Git, deployments, and cloud mutation.
+
+## Permission model
+
+`opencode.json` defines the baseline. Sensitive environment, key, package-credential, and credential/secret JSON patterns are denied. External directories are denied. Shell commands are generally `ask`; limited read-only Git/GitHub observations are allowed while destructive and publishing operations are denied.
+
+All `workflow_*` actions are globally denied. Agent files reopen only required tools. The orchestrator receives state, gate, profile, validation, diagnosis-validation, and delivery-readiness tools. Developer/tester receive only the gate tool. Quick-fix receives state, gate, and classifier. Delivery receives state and readiness plus separately approved scripts. Reviewers and diagnostician receive no shell or custom workflow tools.
+
+OpenCode V2 permission rules are ordered and the last match wins. Review them in order. See [OpenCode permissions](https://opencode.ai/v2/docs/permissions).
+
+## Why typed tools replace shell wildcards
+
+A V2 shell resource is a complete raw command. An automatically allowed rule ending in `*` can also match an appended shell suffix. That creates a command-composition boundary that is difficult to secure.
+
+`.opencode/tools/workflow.ts` instead:
+
+1. Defines bounded input schemas.
+2. Resolves scripts inside the active repository/worktree.
+3. Starts `pwsh` using `Bun.spawn` with an argument vector.
+4. Never constructs an interpolated shell command.
+5. Returns structured exit code, stdout, and stderr.
+
+This prevents an argument from becoming `;`, `&&`, a pipeline, or an appended command at the permission boundary. Scripts still validate values as an independent layer. See [OpenCode custom tools](https://opencode.ai/docs/custom-tools).
+
+## Control-plane protection
+
+At run creation, state hashes `AGENTS.md`, `opencode.json`, `.ai/` except runtime/runs, and `.opencode/`. Sensitive transitions recompute the fingerprint. A mismatch stops the run, so implementation cannot weaken permissions, schemas, scripts, or instructions and use the weakened policy in the same run.
+
+Application agents also have direct edit denials for these paths. The fingerprint detects changes by another process or incorrectly authorized command.
+
+## Approved quality matrix
+
+At `ApprovePlan`, state verifies explicit affected module IDs and builds the canonical matrix of module ID, normalized path, six ordered phases, and commands. It persists the project SHA-256, matrix SHA-256, and module IDs.
+
+The runner accepts only `RunId`. It requires `IMPLEMENTING`, reconstructs the matrix, rejects stale state, accepts `.` as the repository root, and rejects escaping paths.
+
+Gate evidence requires run/project/runner/matrix identity plus fingerprints and results. Recording compares exact module count/order, IDs, paths, phase count/order/names, command count/order/text, derived statuses, hashes, and worktree/control-plane stability. Evidence omitting a module or substituting a harmless command is rejected even if schema-valid.
+
+## Quality command risks
+
+Configured commands are executable repository policy. Bootstrap cites their source and the user approves them. Typed gates prevent agent selection changes; they cannot make a malicious approved command safe.
+
+Review command changes like CI scripts. Never configure deployment, production access, secret retrieval, remote mutation, history rewrite, or data repair. A command that changes delivery content fails worktree stability even when it exits zero.
+
+## Secrets and incident evidence
+
+The workflow denies common secret paths and never requests secret access. Sanitize incident evidence before it enters prompts or `.ai/runtime/`. Do not paste tokens, connection strings, private keys, production payloads, or personal data into tickets, runs, or PR drafts.
+
+Diagnostic artifacts assert that no secrets were accessed and no production mutation occurred. Validation rejects unsafe claims.
+
+## Delivery safety
+
+Delivery begins with shell denied. Read-only observations are reopened, while mutation scripts remain `ask` and require exact approval.
+
+Rules include:
+
+- no default-branch or detached-HEAD mutation;
+- no force push, tags, ref deletion, or history rewrite;
+- no broad staging;
+- Conventional Commits only;
+- no AI authorship attribution;
+- draft PR with explicit base/head only;
+- no reviewers, labels, assignees, comments, merge, or auto-merge;
+- no release, deployment, secret, workflow-dispatch, or cloud mutation.
+
+Gate/review evidence is tied to the exact worktree diff. Later changes invalidate readiness.
+
+## Installation trust
+
+Local exclusion is not access control. Files still exist and can be changed; hashes and fingerprints detect drift. Shared mode makes control-plane changes visible to review but increases repository surface. Teams should add ownership/branch policy where appropriate.
+
+## Outside scope
+
+The workflow does not secure a compromised host, malicious runtime/dependency, tampered OpenCode binary, administrator process, or unsafe project command approved by the user. Use OS isolation, dependency security, CI protections, branch rules, ownership, and secret management alongside it.
+
+Security, authorization, authentication, data integrity, concurrency, migrations, public contracts, infrastructure, dependencies, and generated code are never fast-path eligible.

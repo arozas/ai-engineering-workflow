@@ -30,4 +30,4 @@ When no custom skill is justified, write a valid manifest with an empty `skills`
 
 ## Approval boundary
 
-Before approval, present the complete contents of every proposed project skill and the generated-skills manifest together with `.ai/project.json` and `.ai/project-rules.md`. After explicit approval, write exactly that set, persist the deterministic profile, and run `.ai/scripts/validate-project.ps1`. Any validation or fingerprint mismatch blocks completion.
+Before approval, present the complete contents of every proposed project skill and the generated-skills manifest together with `.ai/project.json` and `.ai/project-rules.md`. After explicit approval, write exactly that set, persist the deterministic profile through `workflow_profile_project`, and run `workflow_validate_project`. Any validation or fingerprint mismatch blocks completion.

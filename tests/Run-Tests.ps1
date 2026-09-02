@@ -48,7 +48,7 @@ try {
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-Mode', 'Local') | Out-Null
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local installation remains invisible to Git.'
     $metadata = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\workflow-installation.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($metadata.workflowVersion -eq '1.7.0') -Message 'Installed metadata records version 1.7.0.'
+    Assert-True -Condition ($metadata.workflowVersion -eq '1.8.0') -Message 'Installed metadata records version 1.8.0.'
 
     $profileScript = Join-Path $repositoryRoot '.ai\scripts\profile-project.ps1'
     $profileOutput = Invoke-PowerShell -ScriptPath $profileScript -Arguments @('-OutputPath', '.ai/project-profile.json') -WorkingDirectory $repositoryRoot
@@ -125,17 +125,68 @@ Applies to `src/app`.
     Assert-True -Condition $true -Message 'A profiled project and generated module skill pass deterministic validation.'
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local personalization artifacts remain invisible to Git.'
 
+    $runtimeRoot = Join-Path $repositoryRoot '.ai\runtime'
+    New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
+    $stateScript = Join-Path $repositoryRoot '.ai\scripts\workflow-state.ps1'
     $gateRunner = Join-Path $repositoryRoot '.ai\scripts\run-quality-gates.ps1'
-    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-ModuleId', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'requirement.md') -Value 'Verify the passing quality-gate fixture.' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'plan.md') -Value 'Run the configured app quality matrix.' -Encoding utf8
+    $passingGateRunId = 'gate-pass-app'
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $passingGateRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', '.ai/runtime/requirement.md') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $passingGateRunId, '-ArtifactPath', '.ai/runtime/plan.md', '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $passingGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $passingGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
     $gateEvidence = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\runtime\gates.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($gateEvidence.overall -eq 'PASS' -and $gateEvidence.modules[0].phases[4].commands[0].exitCode -eq 0 -and $gateEvidence.worktreeStable) -Message 'The deterministic gate runner derives PASS from a real command and stable worktree fingerprints.'
+    Assert-True -Condition ($gateEvidence.runId -eq $passingGateRunId -and $gateEvidence.overall -eq 'PASS' -and $gateEvidence.modules[0].phases[4].commands[0].exitCode -eq 0 -and $gateEvidence.worktreeStable) -Message 'The deterministic gate runner derives PASS from the persisted run matrix and stable worktree fingerprints.'
 
     $project.modules[0].quality.test = @('pwsh -NoProfile -Command "exit 7"')
     $project | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\project.json') -Encoding utf8
-    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-ModuleId', 'app') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'requirement.md') -Value 'Verify the failing quality-gate fixture.' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'plan.md') -Value 'Run the configured failing app quality matrix.' -Encoding utf8
+    $failingGateRunId = 'gate-fail-app'
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $failingGateRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', '.ai/runtime/requirement.md') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $failingGateRunId, '-ArtifactPath', '.ai/runtime/plan.md', '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $failingGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $failingGateRunId) -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
     $failedGateEvidence = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\runtime\gates.json') -Raw | ConvertFrom-Json
     Assert-True -Condition ($failedGateEvidence.overall -eq 'FAIL' -and $failedGateEvidence.modules[0].phases[4].commands[0].exitCode -eq 7) -Message 'The deterministic gate runner derives FAIL and preserves the real nonzero exit code.'
     $project.modules[0].quality.test = @('pwsh -NoProfile -Command "exit 0"')
+    $project | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\project.json') -Encoding utf8
+
+    $project.modules[0].path = '.'
+    $project | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\project.json') -Encoding utf8
+    Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\validate-project.ps1') -Arguments @() -WorkingDirectory $repositoryRoot | Out-Null
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'requirement.md') -Value 'Verify a root-level application module.' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'plan.md') -Value 'Run the root module quality matrix.' -Encoding utf8
+    $rootGateRunId = 'gate-root-module'
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $rootGateRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', '.ai/runtime/requirement.md') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $rootGateRunId, '-ArtifactPath', '.ai/runtime/plan.md', '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $rootGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $rootGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
+    $rootGateEvidence = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\runtime\gates.json') -Raw | ConvertFrom-Json
+    Assert-True -Condition ($rootGateEvidence.overall -eq 'PASS' -and $rootGateEvidence.modules[0].path -eq '.') -Message 'A schema-valid root module executes quality gates at the repository root.'
+    $project.modules[0].path = 'src/app'
+    $project | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\project.json') -Encoding utf8
+
+    $auxiliaryModule = ($project.modules[0] | ConvertTo-Json -Depth 8 | ConvertFrom-Json -AsHashtable)
+    $auxiliaryModule.id = 'aux'
+    $auxiliaryModule.contextSkills = @()
+    $project.modules = @($project.modules[0], $auxiliaryModule)
+    $project | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\project.json') -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'requirement.md') -Value 'Verify that all approved modules are required.' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'plan.md') -Value 'Run app and aux quality matrices.' -Encoding utf8
+    $matrixGateRunId = 'gate-exact-matrix'
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $matrixGateRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', '.ai/runtime/requirement.md') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $matrixGateRunId, '-ArtifactPath', '.ai/runtime/plan.md', '-AffectedModules', 'app,aux') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $matrixGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $matrixGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
+    $partialGateEvidence = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\runtime\gates.json') -Raw | ConvertFrom-Json -AsHashtable
+    $partialGateEvidence.modules = @($partialGateEvidence.modules[0])
+    $partialGateEvidence | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $runtimeRoot 'gates.json') -Encoding utf8
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordGates', '-RunId', $matrixGateRunId, '-ArtifactPath', '.ai/runtime/gates.json', '-Verdict', 'PASS') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Assert-True -Condition $true -Message 'Schema-valid evidence that omits one approved module is rejected.'
+    $project.modules = @($project.modules[0])
     $project | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\project.json') -Encoding utf8
 
     $ordinarySource = Join-Path $sourceRoot 'ordinary.txt'
@@ -166,10 +217,6 @@ Applies to `src/app`.
     Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\validate-project.ps1') -Arguments @('-ProjectPath', '.ai/invalid-project.json') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
     Remove-Item -LiteralPath $invalidProjectPath -Force
     Assert-True -Condition $true -Message 'Known delivery and infrastructure mutations are rejected from diagnostic commands.'
-
-    $runtimeRoot = Join-Path $repositoryRoot '.ai\runtime'
-    New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
-    $stateScript = Join-Path $repositoryRoot '.ai\scripts\workflow-state.ps1'
 
     Set-Content -LiteralPath (Join-Path $runtimeRoot 'requirement.md') -Value 'Production requests intermittently return a stale value; cause unknown.' -Encoding utf8
     $diagnosticRunId = 'diagnose-stale-value'
@@ -257,7 +304,7 @@ Applies to `src/app`.
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $runId, '-WorkflowPath', 'fast-path', '-TaskType', 'QuickFix', '-ArtifactPath', '.ai/runtime/requirement.md') -WorkingDirectory $repositoryRoot | Out-Null
     $approvedPlan = 'Change src/app/app.js, add src/app/new.txt, and verify both files.'
     Set-Content -LiteralPath (Join-Path $runtimeRoot 'plan.md') -Value $approvedPlan -Encoding utf8
-    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $runId, '-ArtifactPath', '.ai/runtime/plan.md') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $runId, '-ArtifactPath', '.ai/runtime/plan.md', '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-Null
     Set-Content -LiteralPath (Join-Path $sourceRoot 'app.js') -Value 'export const value = "after";' -Encoding utf8
     Set-Content -LiteralPath (Join-Path $sourceRoot 'new.txt') -Value 'new file' -Encoding utf8
@@ -271,7 +318,7 @@ Applies to `src/app`.
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordGates', '-RunId', $runId, '-ArtifactPath', '.ai/runtime/gates.json', '-Verdict', 'PASS') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
     Assert-True -Condition $true -Message 'Workflow state rejects an agent-authored PASS artifact without deterministic command evidence.'
 
-    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-ModuleId', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-Null
     $installedDeveloperPath = Join-Path $repositoryRoot '.opencode\agents\developer.md'
     $installedDeveloperBytes = [IO.File]::ReadAllBytes($installedDeveloperPath)
     Add-Content -LiteralPath $installedDeveloperPath -Value "`nunauthorized control-plane mutation"
@@ -313,6 +360,10 @@ Applies to `src/app`.
     $developer = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\developer.md') -Raw
     $quickFix = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\quick-fix.md') -Raw
     Assert-True -Condition ($developer -match 'resource:\s*"\.ai/\*"\s+effect:\s*deny' -and $quickFix -match 'resource:\s*"\.ai/runtime/gates\.json"\s+effect:\s*deny') -Message 'Implementation agents deny control-plane edits and direct gate-evidence writes.'
+    $installedOpenCode = Get-Content -LiteralPath (Join-Path $repositoryRoot 'opencode.json') -Raw
+    $workflowTools = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\tools\workflow.ts') -Raw
+    Assert-True -Condition ($installedOpenCode -notmatch 'run-quality-gates\.ps1 \*.*allow' -and $installedOpenCode -match '"action": "workflow_\*".*"effect": "deny"') -Message 'Managed scripts are not exposed through automatically allowed shell wildcards.'
+    Assert-True -Condition ($workflowTools -match 'Bun\.spawn\(\["pwsh"' -and $workflowTools -match 'export const gate = tool' -and $workflowTools -match 'export const state = tool') -Message 'Typed workflow tools pass validated arguments without shell-string interpolation.'
 
     $benchmarkPath = Join-Path $testRoot 'benchmark.json'
     $benchmarkSummaryPath = Join-Path $testRoot 'benchmark-summary.md'
