@@ -19,6 +19,7 @@ $environmentNames = @(
     'OPENCODE_CONFIG',
     'OPENCODE_CONFIG_CONTENT',
     'OPENCODE_CONFIG_DIR',
+    'OPENCODE_SERVER_USERNAME',
     'OPENCODE_SERVER_PASSWORD',
     'OPENCODE_DISABLE_AUTOUPDATE',
     'OPENCODE_DISABLE_DEFAULT_PLUGINS',
@@ -97,10 +98,32 @@ function Get-OpenCodeServerFailureDetails {
     else {
         "still running with PID $($ServerProcess.Id)"
     }
-    $stdout = ([string](Get-TextFileContent -Path $stdoutPath)).Trim()
-    $stderr = ([string](Get-TextFileContent -Path $stderrPath)).Trim()
+    $stdout = Hide-OpenCodeServerPassword -Value ([string](Get-TextFileContent -Path $stdoutPath)).Trim()
+    $stderr = Hide-OpenCodeServerPassword -Value ([string](Get-TextFileContent -Path $stderrPath)).Trim()
     $healthDetails = if ($HealthErrors.Count -gt 0) { " Health checks: $($HealthErrors -join '; ')" } else { '' }
     return "Process: $exitStatus. Stdout: $stdout Stderr: $stderr$healthDetails"
+}
+
+function Hide-OpenCodeServerPassword {
+    param([AllowNull()][string]$Value)
+
+    if ([string]::IsNullOrEmpty($Value)) { return '' }
+    return ($Value -replace '(?i)(server password\s+)\S+', '${1}<redacted>')
+}
+
+function Get-OpenCodeServerPassword {
+    $stdout = Get-TextFileContent -Path $stdoutPath
+    $match = [regex]::Match($stdout, '(?im)^server password\s+(\S+)\s*$')
+    if ($match.Success) { return $match.Groups[1].Value }
+    return $null
+}
+
+function Get-OpenCodeRequestHeaders {
+    $password = Get-OpenCodeServerPassword
+    if ([string]::IsNullOrWhiteSpace($password)) { return @{} }
+
+    $token = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("opencode:$password"))
+    return @{ Authorization = "Basic $token" }
 }
 
 function Invoke-OpenCodeEndpoint {
@@ -113,10 +136,10 @@ function Invoke-OpenCodeEndpoint {
     $errors = @()
     foreach ($path in $Paths) {
         try {
-            return Invoke-RestMethod -Uri "$BaseUrl$path" -TimeoutSec 10
+            return Invoke-RestMethod -Uri "$BaseUrl$path" -Headers (Get-OpenCodeRequestHeaders) -TimeoutSec 10
         }
         catch {
-            $errors += "${path}: $($_.Exception.Message)"
+            $errors += Hide-OpenCodeServerPassword -Value "${path}: $($_.Exception.Message)"
         }
     }
 
@@ -226,7 +249,7 @@ try {
 
     foreach ($name in $environmentNames) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
     [Environment]::SetEnvironmentVariable('NO_COLOR', '1', 'Process')
-    foreach ($name in @('OPENCODE_CONFIG', 'OPENCODE_CONFIG_CONTENT', 'OPENCODE_CONFIG_DIR', 'OPENCODE_SERVER_PASSWORD')) {
+    foreach ($name in @('OPENCODE_CONFIG', 'OPENCODE_CONFIG_CONTENT', 'OPENCODE_CONFIG_DIR', 'OPENCODE_SERVER_USERNAME', 'OPENCODE_SERVER_PASSWORD')) {
         [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }
     foreach ($name in @('OPENCODE_DISABLE_AUTOUPDATE', 'OPENCODE_DISABLE_DEFAULT_PLUGINS', 'OPENCODE_DISABLE_LSP_DOWNLOAD', 'OPENCODE_DISABLE_MODELS_FETCH')) {
@@ -250,11 +273,11 @@ try {
         if ($process.HasExited) { break }
         foreach ($healthPath in $healthPaths) {
             try {
-                $health = Invoke-RestMethod -Uri "$baseUrl$healthPath" -TimeoutSec 2
+                $health = Invoke-RestMethod -Uri "$baseUrl$healthPath" -Headers (Get-OpenCodeRequestHeaders) -TimeoutSec 2
                 if ($health.healthy -eq $true) { $healthy = $true; break }
             }
             catch {
-                $healthErrors += "${healthPath}: $($_.Exception.Message)"
+                $healthErrors += Hide-OpenCodeServerPassword -Value "${healthPath}: $($_.Exception.Message)"
                 if ($healthErrors.Count -gt 8) { $healthErrors = @($healthErrors | Select-Object -Last 8) }
             }
         }
