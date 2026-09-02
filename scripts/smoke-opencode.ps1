@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateRange(10, 120)][int]$StartupTimeoutSeconds = 45
+    [ValidateRange(10, 180)][int]$StartupTimeoutSeconds = 90
 )
 
 $ErrorActionPreference = 'Stop'
@@ -76,18 +76,31 @@ function Get-TextFileContent {
     param([Parameter(Mandatory = $true)][string]$Path)
 
     if (Test-Path -LiteralPath $Path -PathType Leaf) {
-        return (Get-Content -LiteralPath $Path -Raw)
+        $content = Get-Content -LiteralPath $Path -Raw
+        if ($null -ne $content) { return [string]$content }
     }
     return ''
 }
 
 function Get-OpenCodeServerFailureDetails {
-    param([Parameter(Mandatory = $true)][System.Diagnostics.Process]$ServerProcess)
+    param(
+        [AllowNull()][System.Diagnostics.Process]$ServerProcess,
+        [string[]]$HealthErrors = @()
+    )
 
-    $exitStatus = if ($ServerProcess.HasExited) { "exited with code $($ServerProcess.ExitCode)" } else { 'still running' }
-    $stdout = (Get-TextFileContent -Path $stdoutPath).Trim()
-    $stderr = (Get-TextFileContent -Path $stderrPath).Trim()
-    return "Process: $exitStatus. Stdout: $stdout Stderr: $stderr"
+    $exitStatus = if ($null -eq $ServerProcess) {
+        'not started'
+    }
+    elseif ($ServerProcess.HasExited) {
+        "exited with code $($ServerProcess.ExitCode)"
+    }
+    else {
+        "still running with PID $($ServerProcess.Id)"
+    }
+    $stdout = ([string](Get-TextFileContent -Path $stdoutPath)).Trim()
+    $stderr = ([string](Get-TextFileContent -Path $stderrPath)).Trim()
+    $healthDetails = if ($HealthErrors.Count -gt 0) { " Health checks: $($HealthErrors -join '; ')" } else { '' }
+    return "Process: $exitStatus. Stdout: $stdout Stderr: $stderr$healthDetails"
 }
 
 function Invoke-OpenCodeEndpoint {
@@ -232,6 +245,7 @@ try {
     $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     $healthy = $false
     $healthPaths = @('/api/health', '/global/health')
+    $healthErrors = @()
     while ([DateTime]::UtcNow -lt $deadline) {
         if ($process.HasExited) { break }
         foreach ($healthPath in $healthPaths) {
@@ -239,13 +253,16 @@ try {
                 $health = Invoke-RestMethod -Uri "$baseUrl$healthPath" -TimeoutSec 2
                 if ($health.healthy -eq $true) { $healthy = $true; break }
             }
-            catch { }
+            catch {
+                $healthErrors += "${healthPath}: $($_.Exception.Message)"
+                if ($healthErrors.Count -gt 8) { $healthErrors = @($healthErrors | Select-Object -Last 8) }
+            }
         }
         if ($healthy) { break }
         Start-Sleep -Milliseconds 500
     }
     if (-not $healthy) {
-        throw "OpenCode server did not become healthy. $(Get-OpenCodeServerFailureDetails -ServerProcess $process)"
+        throw "OpenCode server did not become healthy. $(Get-OpenCodeServerFailureDetails -ServerProcess $process -HealthErrors $healthErrors)"
     }
 
     $agents = @(Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/agent', '/api/agent') -Description 'agents')

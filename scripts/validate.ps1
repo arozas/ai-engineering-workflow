@@ -277,7 +277,7 @@ foreach ($smokeToken in @('opencode2', '/api/health', '/global/health', '/agent'
     }
 }
 $ciContent = Get-Content -LiteralPath (Join-Path $workflowRoot '.github\workflows\validate.yml') -Raw
-foreach ($ciToken in @("SUPPORTED_OPENCODE_PACKAGE: '@opencode-ai/cli@beta'", '$env:SUPPORTED_OPENCODE_PACKAGE', 'opencode2 --version', 'opencode-latest-canary:', 'continue-on-error: true', '@opencode-ai/cli@beta')) {
+foreach ($ciToken in @("OPENCODE_V2_PACKAGE: '@opencode-ai/cli@beta'", '$env:OPENCODE_V2_PACKAGE', 'opencode2 --version', 'opencode-v2-smoke:', 'continue-on-error: true')) {
     if ($ciContent -notmatch [regex]::Escape($ciToken)) {
         $errors += "CI is missing supported OpenCode V2 or canary contract: $ciToken."
     }
