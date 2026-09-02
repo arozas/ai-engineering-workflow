@@ -78,17 +78,30 @@ function Start-OpenCodeServer {
         [Parameter(Mandatory = $true)][string]$StandardErrorPath
     )
 
-    $pwshCommand = Get-Command pwsh -ErrorAction Stop
-    return Start-Process -FilePath $pwshCommand.Source `
-        -ArgumentList @(
-            '-NoProfile',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-Command',
-            '& $args[0] serve --hostname 127.0.0.1 --port $args[1]',
-            $CommandSource,
-            [string]$Port
-        ) `
+    $serverArguments = @('serve', '--hostname', '127.0.0.1', '--port', [string]$Port)
+    $extension = [IO.Path]::GetExtension($CommandSource).ToLowerInvariant()
+
+    switch ($extension) {
+        '.cmd' {
+            $filePath = (Get-Command cmd.exe -ErrorAction Stop).Source
+            $argumentList = @('/d', '/s', '/c', "`"$CommandSource`" $($serverArguments -join ' ')")
+        }
+        '.bat' {
+            $filePath = (Get-Command cmd.exe -ErrorAction Stop).Source
+            $argumentList = @('/d', '/s', '/c', "`"$CommandSource`" $($serverArguments -join ' ')")
+        }
+        '.ps1' {
+            $filePath = (Get-Command pwsh -ErrorAction Stop).Source
+            $argumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $CommandSource) + $serverArguments
+        }
+        default {
+            $filePath = $CommandSource
+            $argumentList = $serverArguments
+        }
+    }
+
+    return Start-Process -FilePath $filePath `
+        -ArgumentList $argumentList `
         -WorkingDirectory $WorkingDirectory `
         -WindowStyle Hidden `
         -RedirectStandardOutput $StandardOutputPath `
