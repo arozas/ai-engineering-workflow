@@ -20,7 +20,7 @@ Rules must be imperative, project-specific, and traceable to evidence. Do not co
 
 ## Composition
 
-Keep built-in stack and architecture skill IDs in the module's `contextSkills`, followed by its generated project skill. The project skill should contain only the delta: module ownership, dependency boundaries, file placement, local conventions, error behavior, generated-file restrictions, and test commands supported by this repository.
+Keep built-in stack and architecture skill IDs in the module's `contextSkills`, followed by its generated project skill. Include an architecture skill only when the evidence supports it. For a conventional controller/model/repository application without stronger dependency-boundary evidence, use `architecture-simple-layered` or no architecture skill; do not use `architecture-clean` as a default. The project skill should contain only the delta: module ownership, dependency boundaries, file placement, local conventions, error behavior, generated-file restrictions, and test commands supported by this repository.
 
 ## Manifest
 
@@ -30,4 +30,4 @@ When no custom skill is justified, write a valid manifest with an empty `skills`
 
 ## Approval boundary
 
-Before approval, present the complete contents of every proposed project skill and the generated-skills manifest together with `.ai/project.json` and `.ai/project-rules.md`. After explicit approval, write exactly that set, persist the deterministic profile through `workflow_profile_project`, and run `workflow_validate_project`. Any validation or fingerprint mismatch blocks completion.
+Before approval, write the complete contents of every proposed project skill and the generated-skills manifest together with proposed project configuration and rules under `.ai/bootstrap-proposal/`. The generated-skills manifest must still use final paths such as `.opencode/skills/project-<module-id>/SKILL.md`; the draft skill body lives under `.ai/bootstrap-proposal/skills/project-<module-id>/SKILL.md` until approval. Do not ask for permission to create this durable proposal; approval is required only before applying it. After explicit approval, `/ai-bootstrap-apply` writes exactly the approved proposal, persists the deterministic profile, and runs `workflow_validate_project`. Any validation or fingerprint mismatch blocks completion.

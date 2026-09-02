@@ -32,11 +32,19 @@ Run the installer dry run again. Do not add broad tracked `.gitignore` entries a
 
 Current bootstrap has strict scan budgets and should stop after one profile plus bounded evidence reads. Confirm the installed workflow version is current and `/ai-bootstrap` is running in the consumer application, not the distribution repository.
 
+If OpenCode says `Unknown tool 'workflow_profile_project'`, current bootstrap should run the controlled read-only fallback `pwsh -NoProfile -File .ai/scripts/profile-project.ps1`, report `PROFILE FALLBACK USED`, and continue from that single profile. If it starts broad manual exploration instead, update the installed workflow from this distribution before retrying.
+
+If `/ai-bootstrap` loads `project-context`, asks for a generic bootstrap input confirmation, or writes final `.ai/project.json` immediately after a short `yes`, the installed control plane is stale or inconsistent. Current bootstrap must not use `project-context` before a profile exists, and it must write only draft files under `.ai/bootstrap-proposal/` before approval.
+
+If `/ai-bootstrap` repeats that the profile succeeded and that it must load `repo-bootstrap`, `project-profiler`, and `project-skill-builder`, the runtime/model is treating skill loading as narration instead of an action. Current bootstrap defines concrete file reads for those skills: `.opencode/skills/repo-bootstrap/SKILL.md`, `.opencode/skills/project-profiler/SKILL.md`, and `.opencode/skills/project-skill-builder/SKILL.md`. Update the installed workflow before retrying.
+
+If the proposal is too large for the chat or a provider returns HTTP 413, review `.ai/bootstrap-proposal/evidence.md` and edit the draft files directly. Do not rerun the whole bootstrap just to correct a proposal field. Run `/ai-bootstrap-apply` after the draft files are corrected.
+
 An empty repository returns `NO PROJECT MODULES DETECTED`. The distribution returns `BOOTSTRAP NOT APPLICABLE`. Missing evidence should produce explicit unknowns, not repeated searches.
 
 ## Bootstrap proposes incorrect technology or architecture
 
-Do not approve it. Correct the claim and request evidence. A manifest is stronger evidence than a folder name; architecture requires dependency/behavior evidence. Ask that unsupported fields remain empty or low confidence.
+Do not approve it. Correct the claim and request evidence. A manifest is stronger evidence than a folder name; architecture requires dependency/behavior evidence. Ask that unsupported fields remain empty or low confidence. A conventional controller/model/repository application should normally use `architecture-simple-layered`, not `architecture-clean`, unless inward dependency boundaries and use-case/application layers are proven.
 
 Bootstrap writes only after explicit approval of the complete JSON, rules, generated manifest, and generated skills.
 

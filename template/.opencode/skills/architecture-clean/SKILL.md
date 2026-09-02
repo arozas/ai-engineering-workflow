@@ -4,7 +4,7 @@ description: Preserve Clean Architecture dependency direction, use-case boundari
 compatibility: opencode-v2
 ---
 
-Confirm actual layers and project references before applying this guidance; names such as Domain, Application, Infrastructure, and API are evidence, not proof.
+Confirm actual layers and project references before applying this guidance; names such as Domain, Application, Infrastructure, and API are evidence, not proof. Do not apply this skill to a conventional controller/model/repository API unless the repository also shows inward dependency direction, use-case/application policy boundaries, and infrastructure separated from business policy.
 
 - Dependencies point inward toward policy; inner layers do not reference delivery, persistence, or framework details.
 - Business rules remain independent of transport and storage models.

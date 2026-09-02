@@ -64,7 +64,13 @@ Run:
 /ai-bootstrap
 ```
 
-Bootstrap inspects the project read-only, proposes the complete project configuration and generated skills, and waits for explicit approval before writing them.
+Bootstrap inspects the project, writes an editable draft under `.ai/bootstrap-proposal/`, and keeps the chat response compact. Review or edit the draft, then run:
+
+```text
+/ai-bootstrap-apply
+```
+
+The apply step validates the draft, checks for repository drift, writes the approved project context, and requires `PROJECT_VALID`.
 
 ## Create a new project
 
@@ -92,7 +98,8 @@ Project presets currently include `empty`, `dotnet-webapi`, `node-basic`, `pytho
 
 | Command | Purpose |
 | --- | --- |
-| `/ai-bootstrap` | Profile an existing repository and propose its project context. |
+| `/ai-bootstrap` | Profile an existing repository and write an editable context proposal under `.ai/bootstrap-proposal/`. |
+| `/ai-bootstrap-apply` | Validate and apply the approved bootstrap proposal. |
 | `/ai-refresh` | Propose context updates after structural repository changes. |
 | `/ticket` | Normalize a ticket/specification and propose a standard implementation plan. |
 | `/implement` | Implement exactly one persisted, approved plan. |

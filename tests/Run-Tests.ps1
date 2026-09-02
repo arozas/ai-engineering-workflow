@@ -69,6 +69,43 @@ try {
     Invoke-PowerShell -ScriptPath $profileScript -Arguments @('-OutputPath', 'src/app/forbidden-profile.json') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
     Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $sourceRoot 'forbidden-profile.json'))) -Message 'The profiler cannot use its approved output option to overwrite application paths.'
 
+    $bootstrapProposalRoot = Join-Path $repositoryRoot '.ai\bootstrap-proposal'
+    New-Item -ItemType Directory -Path $bootstrapProposalRoot -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot '.ai\project-profile.json') -Destination (Join-Path $bootstrapProposalRoot 'project-profile.json') -Force
+    [ordered]@{
+        version = 1
+        repositoryFingerprint = [string]$profile.structureFingerprint
+        generatedAtUtc = [DateTime]::UtcNow.ToString('o')
+        skills = @()
+    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $bootstrapProposalRoot 'generated-skills.json') -Encoding utf8
+    [ordered]@{
+        '$schema' = './project.schema.json'
+        version = 1
+        name = 'workflow-test-consumer'
+        fastPath = [ordered]@{ enabled = $true; maximumFiles = 3; maximumLines = 120; maximumProductionFilesForDiagnosis = 2; maximumTestFilesForDiagnosis = 2; maximumCorrectionIterations = 1 }
+        review = [ordered]@{ maxIterations = 2; diffBudget = [ordered]@{ filesMultiplier = 2; linesMultiplier = 3 } }
+        diagnostics = [ordered]@{ maxHypothesisIterations = 2; requireReproduction = $false; commands = @() }
+        profile = [ordered]@{ repositoryFingerprint = [string]$profile.structureFingerprint; analyzedAtUtc = [DateTime]::UtcNow.ToString('o'); source = '.ai/project-profile.json'; generatedSkillsManifest = '.ai/generated-skills.json' }
+        modules = @([ordered]@{
+            id = 'app'
+            path = 'src/app'
+            languages = @('javascript')
+            frameworks = @()
+            architectures = @()
+            contextSkills = @('stack-node')
+            quality = [ordered]@{ restore = @(); build = @(); lint = @(); typecheck = @(); test = @('pwsh -NoProfile -Command "exit 0"'); e2e = @() }
+        })
+    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $bootstrapProposalRoot 'project.json') -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $bootstrapProposalRoot 'project-rules.md') -Value '# Project rules' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $bootstrapProposalRoot 'evidence.md') -Value '# Bootstrap evidence' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $bootstrapProposalRoot 'approval.md') -Value 'Run /ai-bootstrap-apply after approval.' -Encoding utf8
+    $bootstrapApplyScript = Join-Path $repositoryRoot '.ai\scripts\apply-bootstrap-proposal.ps1'
+    $bootstrapDryRun = Invoke-PowerShell -ScriptPath $bootstrapApplyScript -Arguments @('-DryRun') -WorkingDirectory $repositoryRoot
+    Assert-True -Condition (($bootstrapDryRun -join "`n") -match 'BOOTSTRAP_PROPOSAL_VALID') -Message 'Durable bootstrap proposal validates before applying.'
+    $bootstrapApply = Invoke-PowerShell -ScriptPath $bootstrapApplyScript -Arguments @() -WorkingDirectory $repositoryRoot
+    Assert-True -Condition (($bootstrapApply -join "`n") -match 'PROJECT_VALID') -Message 'Approved durable bootstrap proposal applies and validates deterministically.'
+    Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Durable bootstrap proposal and applied local context remain invisible to Git.'
+
     $projectSkillRoot = Join-Path $repositoryRoot '.opencode\skills\project-app'
     New-Item -ItemType Directory -Path $projectSkillRoot -Force | Out-Null
     @'
@@ -533,10 +570,25 @@ exit 0
     $developer = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\developer.md') -Raw
     $quickFix = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\quick-fix.md') -Raw
     Assert-True -Condition ($developer -match 'resource:\s*"\.ai/\*"\s+effect:\s*deny' -and $quickFix -match 'resource:\s*"\.ai/runtime/\*/gates\.json"\s+effect:\s*deny') -Message 'Implementation agents deny control-plane edits and direct gate-evidence writes.'
+    $installedAgents = Get-Content -LiteralPath (Join-Path $repositoryRoot 'AGENTS.md') -Raw
+    $installedOrchestrator = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\orchestrator.md') -Raw
     $installedOpenCode = Get-Content -LiteralPath (Join-Path $repositoryRoot 'opencode.json') -Raw
     $workflowTools = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\tools\workflow.ts') -Raw
+    $installedBootstrapCommand = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\commands\ai-bootstrap.md') -Raw
+    $installedBootstrapApplyCommand = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\commands\ai-bootstrap-apply.md') -Raw
+    $installedProjectContextSkill = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\project-context\SKILL.md') -Raw
+    $installedRepoBootstrapSkill = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\repo-bootstrap\SKILL.md') -Raw
+    $installedProjectProfilerSkill = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\project-profiler\SKILL.md') -Raw
+    $installedProjectSkillBuilder = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\project-skill-builder\SKILL.md') -Raw
+    $installedSimpleLayeredArchitecture = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\architecture-simple-layered\SKILL.md') -Raw
     Assert-True -Condition ($installedOpenCode -notmatch 'run-quality-gates\.ps1 \*.*allow' -and $installedOpenCode -match '"action": "workflow_\*".*"effect": "deny"') -Message 'Managed scripts are not exposed through automatically allowed shell wildcards.'
-    Assert-True -Condition ($workflowTools -match 'Bun\.spawn\(\["pwsh"' -and $workflowTools -match 'export const gate = tool' -and $workflowTools -match 'export const state = tool') -Message 'Typed workflow tools pass validated arguments without shell-string interpolation.'
+    Assert-True -Condition ($workflowTools -match 'Bun\.spawn\(\["pwsh"' -and $workflowTools -match 'export const gate = tool' -and $workflowTools -match 'export const state = tool' -and $workflowTools -match 'export const bootstrap_apply = tool') -Message 'Typed workflow tools pass validated arguments without shell-string interpolation.'
+    Assert-True -Condition ($installedAgents -match 'For `/ai-bootstrap`, do not load `project-context` first' -and $installedOrchestrator -match 'Do not load `project-context`, ask for bootstrap input, infer architecture from ad hoc browsing' -and $installedOrchestrator -match 'Reading those files is the skill-loading mechanism') -Message 'Bootstrap precedence prevents AGENTS/orchestrator guidance from bypassing the profiler-first contract.'
+    Assert-True -Condition ($installedProjectContextSkill -match 'If the current task is `/ai-bootstrap`, stop using this skill' -and $installedProjectContextSkill -match 'do not inspect files, ask for bootstrap input, or create project configuration from this skill') -Message 'project-context cannot bootstrap a missing project from ad hoc exploration.'
+    Assert-True -Condition ($installedBootstrapCommand -match 'PROFILE FALLBACK USED' -and $installedBootstrapCommand -match 'BOOTSTRAP BLOCKED: PROFILE TOOL UNAVAILABLE' -and $installedBootstrapCommand -match 'Do not ask permission to create the proposal' -and $installedBootstrapCommand -match 'Loop guard: after a schema-shaped profile exists') -Message 'Bootstrap command provides a controlled profiler fallback and forbids intermediate proposal prompts.'
+    Assert-True -Condition ($installedBootstrapCommand -match '\.ai/bootstrap-proposal/project\.json' -and $installedBootstrapCommand -match 'workflow_bootstrap_apply' -and $installedBootstrapApplyCommand -match 'BOOTSTRAP_PROPOSAL_VALID' -and $installedBootstrapApplyCommand -match 'PROJECT_VALID') -Message 'Bootstrap commands use durable proposal files and an explicit apply step.'
+    Assert-True -Condition ($installedRepoBootstrapSkill -match 'produce the full proposal in durable draft files' -and $installedRepoBootstrapSkill -match 'Do not announce that they need to be loaded without reading them' -and $installedProjectProfilerSkill -match '\.ai/bootstrap-proposal/project-profile\.json' -and $installedProjectSkillBuilder -match 'do not use `architecture-clean` as a default') -Message 'Bootstrap skills enforce full proposal output, persistence fallback, loop prevention, and conservative architecture selection.'
+    Assert-True -Condition ($installedSimpleLayeredArchitecture -match 'controller/model/repository' -and $installedSimpleLayeredArchitecture -match 'do not add layers') -Message 'Simple layered architecture skill supports conventional APIs without architecture inflation.'
 
     $benchmarkPath = Join-Path $testRoot 'benchmark.json'
     $benchmarkSummaryPath = Join-Path $testRoot 'benchmark-summary.md'

@@ -213,4 +213,5 @@ Write-Host 'Next:'
 Write-Host "  cd `"$targetRoot`""
 Write-Host '  opencode2'
 Write-Host '  /ai-bootstrap'
+Write-Host '  /ai-bootstrap-apply'
 Write-Host 'Bootstrap will profile the generated repository and compose its project-specific context.'

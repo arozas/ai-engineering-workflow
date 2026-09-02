@@ -383,8 +383,8 @@ try {
     $toolNames = Get-DefinitionNames -Definitions $toolIds
 
     $expectedAgents = @('orchestrator', 'developer', 'reviewer', 'tester', 'delivery', 'diagnostician', 'quick-fix', 'quick-reviewer')
-    $expectedCommands = @('ai-bootstrap', 'ai-refresh', 'branch', 'commit', 'delivery-check', 'diagnose', 'explain', 'implement', 'pr', 'pr-create', 'publish', 'quick-fix', 'review', 'run-status', 'small-task', 'test', 'ticket')
-    $expectedTools = @('workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_fast_path', 'workflow_validate_project', 'workflow_profile_project', 'workflow_validate_diagnosis', 'workflow_delivery_check')
+    $expectedCommands = @('ai-bootstrap', 'ai-bootstrap-apply', 'ai-refresh', 'branch', 'commit', 'delivery-check', 'diagnose', 'explain', 'implement', 'pr', 'pr-create', 'publish', 'quick-fix', 'review', 'run-status', 'small-task', 'test', 'ticket')
+    $expectedTools = @('workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_fast_path', 'workflow_validate_project', 'workflow_profile_project', 'workflow_bootstrap_apply', 'workflow_validate_diagnosis', 'workflow_delivery_check')
     $missingAgents = @($expectedAgents | Where-Object { $agentNames -notcontains $_ })
     $missingCommands = @($expectedCommands | Where-Object { $commandNames -notcontains $_ })
     $missingTools = @($expectedTools | Where-Object { $toolNames -notcontains $_ })

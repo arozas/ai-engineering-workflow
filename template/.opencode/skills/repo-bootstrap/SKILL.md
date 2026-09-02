@@ -6,13 +6,17 @@ compatibility: opencode-v2
 
 ## Safety contract
 
-Bootstrap is read-only until the user explicitly approves the complete proposal. Never infer a convention merely because it is fashionable. Existing files and executable project metadata are stronger evidence than directory names.
+Bootstrap may write only durable draft proposal files under `.ai/bootstrap-proposal/` before approval. It must not modify final project context until the user explicitly approves `/ai-bootstrap-apply`. Never infer a convention merely because it is fashionable. Existing files and executable project metadata are stronger evidence than directory names.
 
-Load `project-profiler` and `project-skill-builder`. The installer remains deterministic and model-independent; repository personalization belongs to this approved bootstrap phase.
+This skill is valid only after the calling command has a schema-shaped deterministic profile. Confirm that `.opencode/skills/project-profiler/SKILL.md` and `.opencode/skills/project-skill-builder/SKILL.md` have been read. If not, read those files exactly once and continue. Do not announce that they need to be loaded without reading them.
 
 ## Mandatory empty-repository fast path
 
-The calling command should already have inventoried files outside `AGENTS.md`, `opencode.json`, `.ai/**`, and `.opencode/**`. If that inventory is empty, return `NO PROJECT MODULES DETECTED` immediately. Do not read more files or perform language-specific searches.
+The calling command should already have inventoried files outside `AGENTS.md`, `opencode.json`, `.ai/**`, and `.opencode/**` by using `workflow_profile_project` or the documented fallback `pwsh -NoProfile -File .ai/scripts/profile-project.ps1`. If that inventory is empty, return `NO PROJECT MODULES DETECTED` immediately. Do not read more files or perform language-specific searches.
+
+If no deterministic profile is available, stop with `BOOTSTRAP BLOCKED: PROFILE TOOL UNAVAILABLE`. Do not continue with manual directory exploration. If the fallback profile was used, include `PROFILE FALLBACK USED` in the proposal and reuse only that profile as the inventory source.
+
+Loop guard: never restate the profile result or the need to read skills more than once. Once the required skill files are read, immediately perform the bounded evidence pass or produce the proposal.
 
 ## Preflight classification
 
@@ -45,21 +49,21 @@ When `.ai/bootstrap-input.json` exists, read it once. Treat requested stacks and
 
 ## Propose
 
-For an applicable repository, present:
+For an applicable repository, produce the full proposal in durable draft files under `.ai/bootstrap-proposal/`. Do not ask whether to proceed before creating the proposal. Write:
 
-1. Detected repository shape and modules.
-2. Technology and architecture per module with `HIGH`, `MEDIUM`, or `LOW` confidence and evidence.
-3. Exact quality commands and the source proving each command. Leave an array empty when no command is established.
-4. Selected `contextSkills` per module.
-5. Risks, unknowns, and questions.
-6. A complete `.ai/project.json` conforming to `.ai/project.schema.json`.
-7. Proposed project-rule changes.
-8. A complete `.ai/generated-skills.json`, including an empty `skills` array when no custom skill is justified.
-9. Full proposed contents of each minimal `project-<module-id>` skill, with evidence and confidence.
-10. Exploration ledger summary and deterministic structure fingerprint.
-11. A `diagnostics` policy. Default to three hypothesis iterations, no mandatory reproduction, and no commands unless repository evidence establishes safe local inspection or reproduction commands.
+1. `.ai/bootstrap-proposal/project-profile.json` with the exact profile used for inference.
+2. `.ai/bootstrap-proposal/project.json`, conforming to `.ai/project.schema.json` and using final paths.
+3. `.ai/bootstrap-proposal/project-rules.md` with proposed project-rule changes.
+4. `.ai/bootstrap-proposal/generated-skills.json`, including an empty `skills` array when no custom skill is justified.
+5. `.ai/bootstrap-proposal/skills/project-<module-id>/SKILL.md` for each justified generated project skill.
+6. `.ai/bootstrap-proposal/evidence.md` containing detected repository shape and modules; technology and architecture per module with `HIGH`, `MEDIUM`, or `LOW` confidence and evidence; exact quality commands and the source proving each command; selected `contextSkills`; risks, unknowns, and questions; full generated-skill rationale; exploration ledger summary; deterministic structure fingerprint; and diagnostics policy.
+7. `.ai/bootstrap-proposal/approval.md` explaining that users may edit the draft files, then run `/ai-bootstrap-apply` to validate and persist them.
 
-Wait for explicit approval. On approval, rerun `workflow_profile_project` with `persist: true`; stop if its fingerprint differs from the approved proposal. Then write only the approved `.ai/project.json`, `.ai/project-rules.md`, `.ai/generated-skills.json`, and approved project skill files. Run `workflow_validate_project` and report `PROJECT_VALID` before summarizing corrections made by the user. A failed deterministic validation blocks bootstrap completion.
+After writing the draft files, run `workflow_bootstrap_apply` with `dryRun: true`. If validation fails, correct only files under `.ai/bootstrap-proposal/` and rerun the dry run. Do not write final `.ai/project.json`, `.ai/project-rules.md`, `.ai/generated-skills.json`, `.ai/project-profile.json`, or `.opencode/skills/project-*/SKILL.md` during `/ai-bootstrap`.
+
+Architecture confidence must be conservative. Use `architecture-clean` only when repository evidence shows real inward dependency boundaries, use-case/application policy layers, and infrastructure depending on abstractions owned by inner layers. Use `architecture-hexagonal` only when ports and adapters are explicit. Use `architecture-vertical-slice` only when features own their request/handler/domain/test flow. Use `architecture-event-driven` only when event contracts and consumers/producers are first-class. Use `architecture-simple-layered` for conventional applications organized by controllers/endpoints, DTOs/models, services/repositories, and persistence without the stronger architecture evidence above. If no architecture pattern is supported, leave `architectures` empty and omit architecture skills.
+
+End with a compact summary and ask the user to edit the draft files or explicitly run `/ai-bootstrap-apply`. `/ai-bootstrap-apply` reruns the profiler, stops if its fingerprint differs from the approved proposal, writes only approved final context files, runs `workflow_validate_project`, and reports `PROJECT_VALID`. A failed deterministic validation blocks bootstrap completion.
 
 Unless the user selects stricter limits, propose the schema defaults for `fastPath`: enabled, at most three files, at most 120 added-plus-deleted lines, at most two production and two test files during diagnosis, and exactly one correction iteration. Never propose values above the schema maxima.
 

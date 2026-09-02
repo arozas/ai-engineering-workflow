@@ -17,29 +17,48 @@ Installation remains deterministic and model-independent. Personalization is a s
 - CI/CD and convention files;
 - manifest hashes and a structural fingerprint.
 
-During proposal the profile is not written. Bootstrap then performs one bounded evidence scan: at most 20 relevant manifests/configuration files, three representative source and three test files per candidate module, and 18 representative files overall. It keeps a ledger and does not repeat equivalent searches.
+During proposal the final profile is not written. Bootstrap then performs one bounded evidence scan: at most 20 relevant manifests/configuration files, three representative source and three test files per candidate module, and 18 representative files overall. It keeps a ledger and does not repeat equivalent searches.
+
+If OpenCode does not expose `workflow_profile_project`, bootstrap may use exactly one controlled fallback: `pwsh -NoProfile -File .ai/scripts/profile-project.ps1`. The fallback is still read-only and must be reported as `PROFILE FALLBACK USED`. It is not permission to browse the repository manually.
 
 Empty repositories stop with `NO PROJECT MODULES DETECTED`. The distribution repository stops with `BOOTSTRAP NOT APPLICABLE`. Bootstrap never invents a module to satisfy the schema.
 
 ## Proposal contract
 
-Before writing, bootstrap presents:
+Before approval, bootstrap writes a durable draft proposal under `.ai/bootstrap-proposal/` instead of using the conversation as the only working buffer:
+
+```text
+.ai/bootstrap-proposal/
+├── project-profile.json
+├── project.json
+├── project-rules.md
+├── generated-skills.json
+├── evidence.md
+├── approval.md
+└── skills/
+    └── project-<module-id>/
+        └── SKILL.md
+```
+
+The draft `project.json` uses final installed paths such as `.ai/project-profile.json`, `.ai/generated-skills.json`, and `.opencode/skills/project-<module-id>/SKILL.md`. `evidence.md` contains the detailed review material:
 
 1. Repository shape and modules.
 2. Technology and architecture per module with confidence and exact evidence.
 3. Exact quality commands and the source proving each command.
 4. Context skills selected for each module.
 5. Risks, unknowns, and questions.
-6. A complete schema-valid `.ai/project.json`.
+6. Rationale for `.ai/project.json`.
 7. Proposed `.ai/project-rules.md` contents.
-8. A complete `.ai/generated-skills.json`.
-9. Complete content for every proposed `project-<module-id>` skill.
+8. Rationale for `.ai/generated-skills.json`.
+9. Complete content rationale for every proposed `project-<module-id>` skill.
 10. Exploration ledger and structural fingerprint.
 11. A bounded diagnostics policy.
 
 Arrays remain empty when evidence does not establish a command or technology. Confidence communicates evidence strength; it does not turn a weak inference into a rule.
 
-After approval, bootstrap persists the profile again. Structural drift blocks the write. It then writes only approved project context and requires `PROJECT_VALID`.
+After writing the draft, bootstrap runs a dry validation through `workflow_bootstrap_apply`. The chat response stays compact: fingerprint, modules, selected skills, files written, risks, and validation status.
+
+After approval, `/ai-bootstrap-apply` persists the profile again. Structural drift blocks the write. It then writes only approved project context and requires `PROJECT_VALID`.
 
 ## `.ai/project.json`
 
@@ -98,9 +117,9 @@ Validation rejects missing files, wrong names, dangling module IDs, stale finger
 
 ## Stack and architecture composition
 
-Built-in stack profiles are `stack-dotnet`, `stack-java`, `stack-node`, `stack-python`, and `stack-react`. Architecture skills are `architecture-clean`, `architecture-event-driven`, `architecture-hexagonal`, and `architecture-vertical-slice`.
+Built-in stack profiles are `stack-dotnet`, `stack-java`, `stack-node`, `stack-python`, and `stack-react`. Architecture skills are `architecture-clean`, `architecture-event-driven`, `architecture-hexagonal`, `architecture-vertical-slice`, and `architecture-simple-layered`.
 
-They load only for affected configured modules. Architecture labels require evidence such as dependency direction, ports/adapters, slices, or handlers/events. Directory names alone normally justify only low confidence.
+They load only for affected configured modules. Architecture labels require evidence such as dependency direction, ports/adapters, slices, or handlers/events. Directory names alone normally justify only low confidence. Use `architecture-simple-layered` for conventional controller/model/repository applications when stronger architecture evidence is missing.
 
 ## Refreshing context
 

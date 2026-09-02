@@ -257,6 +257,18 @@ export const profile_project = tool({
   },
 })
 
+export const bootstrap_apply = tool({
+  description: "Validate and apply the approved durable bootstrap proposal from .ai/bootstrap-proposal.",
+  args: {
+    dryRun: tool.schema.boolean().optional(),
+  },
+  async execute(input, context) {
+    const args: string[] = []
+    addSwitch(args, "-DryRun", input.dryRun)
+    return invokePowerShell("apply-bootstrap-proposal.ps1", args, context)
+  },
+})
+
 export const validate_diagnosis = tool({
   description: "Validate a production-diagnosis artifact before it can advance workflow state.",
   args: {

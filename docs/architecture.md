@@ -20,6 +20,7 @@ Installation copies the template into a consumer repository. OpenCode then disco
 AGENTS.md
 opencode.json
 .ai/
+  bootstrap-proposal/ editable bootstrap draft
   project.json
   project-rules.md
   schemas and deterministic scripts
@@ -61,7 +62,7 @@ The orchestrator never implements production code. Review agents do not rediscov
 
 Skills separate stable procedure from project-specific facts. Core skills cover ticket analysis, planning, review, state, quality gates, delivery, diagnosis, Azure DevOps, stacks, and architectures.
 
-After bootstrap, each module in `.ai/project.json` lists `contextSkills`. Agents load only the skills for affected modules. A project may therefore combine, for example, .NET clean architecture in one module and React vertical slices in another without loading both contexts for every task.
+After bootstrap, each module in `.ai/project.json` lists `contextSkills`. Agents load only the skills for affected modules. A project may therefore combine, for example, .NET Clean Architecture in one module, a simple layered API in another, and React vertical slices in another without loading every context for every task.
 
 Generated `project-<module-id>` skills capture evidence-backed local conventions that generic stack profiles cannot know. They are declared in `.ai/generated-skills.json` and validated against the deterministic project profile.
 
@@ -116,7 +117,7 @@ A blocked diagnostic run may begin another explicitly approved bounded iteration
 
 ## Deterministic execution boundary
 
-OpenCode custom tools in `.opencode/tools/workflow.ts` expose typed operations such as `workflow_state`, `workflow_gate`, `workflow_standard_review`, `workflow_quick_review`, `workflow_fast_path`, and `workflow_validate_project`. Each tool validates its arguments and starts PowerShell with an argument vector rather than constructing a shell command string.
+OpenCode custom tools in `.opencode/tools/workflow.ts` expose typed operations such as `workflow_state`, `workflow_gate`, `workflow_standard_review`, `workflow_quick_review`, `workflow_fast_path`, `workflow_validate_project`, and `workflow_bootstrap_apply`. Each tool validates its arguments and starts PowerShell with an argument vector rather than constructing a shell command string.
 
 The underlying scripts remain usable by maintainers and tests, but agents receive only the tools required by their roles. The global policy denies all `workflow_*` actions by default, after which agent definitions reopen exact actions.
 

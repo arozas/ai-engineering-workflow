@@ -19,7 +19,7 @@ This directory contains the detailed operating and design documentation for AI E
 
 - Examples use PowerShell 7 because the distribution scripts target Windows and cross-platform `pwsh`.
 - Commands shown for maintainers are not automatically available to every installed agent. Agent permissions are defined separately.
-- `.ai/project.json` is the consumer project's machine-readable context after approved bootstrap.
+- `.ai/bootstrap-proposal/` is the editable bootstrap draft; `.ai/project.json` is the consumer project's machine-readable context after approved `/ai-bootstrap-apply`.
 - `.ai/runs/` contains canonical evidence and `.ai/runtime/<run-id>/` contains isolated staging; neither is application delivery content.
 - Project behavior is evidence-driven. Unknowns remain unknown instead of being filled with fashionable defaults.
 - An LLM statement is never a substitute for schema validation, an exit code, a hash, or a persisted approval.

@@ -58,6 +58,7 @@ foreach ($required in @(
     'template\.ai\pull-request-template.md',
     'template\.ai\scripts\fast-path-check.ps1',
     'template\.ai\scripts\profile-project.ps1',
+    'template\.ai\scripts\apply-bootstrap-proposal.ps1',
     'template\.ai\scripts\validate-project.ps1',
     'template\.ai\scripts\workflow-state.ps1',
     'template\.ai\scripts\run-quality-gates.ps1',
@@ -75,6 +76,7 @@ foreach ($required in @(
     'template\.opencode\agents\diagnostician.md',
     'template\.opencode\tools\workflow.ts',
     'template\.opencode\commands\ai-bootstrap.md',
+    'template\.opencode\commands\ai-bootstrap-apply.md',
     'template\.opencode\commands\quick-fix.md',
     'template\.opencode\commands\small-task.md',
     'template\.opencode\commands\ai-refresh.md',
@@ -88,6 +90,7 @@ foreach ($required in @(
     'template\.opencode\skills\production-diagnosis\SKILL.md',
     'template\.opencode\skills\project-profiler\SKILL.md',
     'template\.opencode\skills\project-skill-builder\SKILL.md',
+    'template\.opencode\skills\architecture-simple-layered\SKILL.md',
     '.github\pull_request_template.md'
 )) {
     if (-not (Test-Path -LiteralPath (Join-Path $workflowRoot $required) -PathType Leaf)) {
@@ -153,6 +156,14 @@ $quickReviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot '
 $reviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\reviewer.md') -Raw
 $orchestratorAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\orchestrator.md') -Raw
 $deliveryAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\delivery.md') -Raw
+$rootAgentsContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\AGENTS.md') -Raw
+$bootstrapCommandContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\commands\ai-bootstrap.md') -Raw
+$projectContextSkillContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\skills\project-context\SKILL.md') -Raw
+$repoBootstrapSkillContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\skills\repo-bootstrap\SKILL.md') -Raw
+$projectProfilerSkillContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\skills\project-profiler\SKILL.md') -Raw
+$projectSkillBuilderContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\skills\project-skill-builder\SKILL.md') -Raw
+$cleanArchitectureSkillContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\skills\architecture-clean\SKILL.md') -Raw
+$simpleLayeredSkillContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\skills\architecture-simple-layered\SKILL.md') -Raw
 if ($quickFixAgentContent -notmatch '(?m)^steps:\s*16\s*$') {
     $errors += 'quick-fix agent must keep its bounded 16-step budget.'
 }
@@ -195,7 +206,7 @@ if ($deliveryAgentContent -match $deliveryCommitEditPattern) {
     $errors += 'delivery must not author commit evidence directly; commit-approved.ps1 owns it.'
 }
 $typedToolContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\tools\workflow.ts') -Raw
-foreach ($toolExport in @('state', 'standard_review', 'quick_review', 'gate', 'fast_path', 'validate_project', 'profile_project', 'validate_diagnosis', 'delivery_check')) {
+foreach ($toolExport in @('state', 'standard_review', 'quick_review', 'gate', 'fast_path', 'validate_project', 'profile_project', 'bootstrap_apply', 'validate_diagnosis', 'delivery_check')) {
     if ($typedToolContent -notmatch [regex]::Escape("export const $toolExport = tool")) {
         $errors += "Typed workflow tool is missing export: $toolExport."
     }
@@ -207,6 +218,7 @@ if ($typedToolContent -notmatch [regex]::Escape('Bun.spawn(["pwsh", "-NoProfile"
 foreach ($agentToolRequirement in @{
     'orchestrator workflow_state' = @($orchestratorAgentContent, 'workflow_state')
     'orchestrator workflow_gate' = @($orchestratorAgentContent, 'workflow_gate')
+    'orchestrator workflow_bootstrap_apply' = @($orchestratorAgentContent, 'workflow_bootstrap_apply')
     'developer workflow_gate' = @($developerAgentContent, 'workflow_gate')
     'quick-fix workflow_fast_path' = @($quickFixAgentContent, 'workflow_fast_path')
     'quick-fix workflow_state' = @($quickFixAgentContent, 'workflow_state')
@@ -276,7 +288,7 @@ foreach ($onboardingScript in @('scripts\install.ps1', 'scripts\new-project.ps1'
     }
 }
 $openCodeSmokeContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\smoke-opencode.ps1') -Raw
-foreach ($smokeToken in @('opencode2', 'AllowLegacyOpenCodeFallback', 'SelfTest', 'OpenCode smoke helper self-test passed', '/api/health', '/global/health', '/api/agent', '/api/command', '/api/experimental/tool/ids', 'directory=', 'Authorization', '<redacted>', 'workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate')) {
+foreach ($smokeToken in @('opencode2', 'AllowLegacyOpenCodeFallback', 'SelfTest', 'OpenCode smoke helper self-test passed', '/api/health', '/global/health', '/api/agent', '/api/command', '/api/experimental/tool/ids', 'directory=', 'Authorization', '<redacted>', 'workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_bootstrap_apply')) {
     if ($openCodeSmokeContent -notmatch [regex]::Escape($smokeToken)) {
         $errors += "OpenCode smoke test is missing discovery check: $smokeToken."
     }
@@ -316,6 +328,46 @@ foreach ($reviewDefinition in @{
 if ($diagnosticianAgentContent -notmatch '(?ms)- action:\s*edit\s+resource:\s*"\*"\s+effect:\s*deny' -or
     $diagnosticianAgentContent -notmatch '(?ms)- action:\s*subagent\s+resource:\s*"\*"\s+effect:\s*deny') {
     $errors += 'diagnostician must deny all edit and subagent access.'
+}
+foreach ($bootstrapToken in @('PROFILE FALLBACK USED', 'BOOTSTRAP BLOCKED: PROFILE TOOL UNAVAILABLE', 'profile-project.ps1', 'Do not ask permission to create the proposal', 'architecture-simple-layered', 'Reading these files is the skill-loading mechanism', 'Loop guard: after a schema-shaped profile exists', '.ai/bootstrap-proposal/project.json', 'workflow_bootstrap_apply', '/ai-bootstrap-apply')) {
+    if ($bootstrapCommandContent -notmatch [regex]::Escape($bootstrapToken)) {
+        $errors += "ai-bootstrap command is missing bootstrap robustness contract: $bootstrapToken."
+    }
+}
+foreach ($bootstrapPrecedenceToken in @('For `/ai-bootstrap`, do not load `project-context` first', 'Bootstrap has no trusted project context yet', 'do not guess, infer, or write project configuration from ad hoc exploration')) {
+    if ($rootAgentsContent -notmatch [regex]::Escape($bootstrapPrecedenceToken)) {
+        $errors += "AGENTS.md is missing bootstrap precedence guard: $bootstrapPrecedenceToken."
+    }
+}
+foreach ($orchestratorBootstrapToken in @('For `/ai-bootstrap`, follow the command file before any normal planning behavior', 'Reading those files is the skill-loading mechanism', 'Do not load `project-context`, ask for bootstrap input, infer architecture from ad hoc browsing', 'write final `.ai/project.json` before creating the durable `.ai/bootstrap-proposal/` draft', 'For `/ai-bootstrap-apply`, do not regenerate or reinterpret the proposal')) {
+    if ($orchestratorAgentContent -notmatch [regex]::Escape($orchestratorBootstrapToken)) {
+        $errors += "orchestrator is missing bootstrap precedence guard: $orchestratorBootstrapToken."
+    }
+}
+foreach ($projectContextBootstrapToken in @('If the current task is `/ai-bootstrap`, stop using this skill', 'Project context is not trusted until bootstrap is approved and persisted', 'do not inspect files, ask for bootstrap input, or create project configuration from this skill')) {
+    if ($projectContextSkillContent -notmatch [regex]::Escape($projectContextBootstrapToken)) {
+        $errors += "project-context skill is missing bootstrap escape hatch: $projectContextBootstrapToken."
+    }
+}
+foreach ($bootstrapSkillToken in @('PROFILE FALLBACK USED', 'BOOTSTRAP BLOCKED: PROFILE TOOL UNAVAILABLE', 'Do not continue with manual directory exploration', 'Do not announce that they need to be loaded without reading them', 'Loop guard: never restate the profile result', 'produce the full proposal in durable draft files', 'workflow_bootstrap_apply', 'architecture-simple-layered')) {
+    if ($repoBootstrapSkillContent -notmatch [regex]::Escape($bootstrapSkillToken)) {
+        $errors += "repo-bootstrap skill is missing bootstrap robustness contract: $bootstrapSkillToken."
+    }
+}
+foreach ($profilerToken in @('PROFILE FALLBACK USED', 'BOOTSTRAP BLOCKED: PROFILE TOOL UNAVAILABLE', '.ai/bootstrap-proposal/project-profile.json', '.ai/project-profile.json', 'architecture-simple-layered')) {
+    if ($projectProfilerSkillContent -notmatch [regex]::Escape($profilerToken)) {
+        $errors += "project-profiler skill is missing controlled fallback or conservative architecture guidance: $profilerToken."
+    }
+}
+if ($projectSkillBuilderContent -notmatch [regex]::Escape('do not use `architecture-clean` as a default')) {
+    $errors += 'project-skill-builder must forbid defaulting conventional layered applications to architecture-clean.'
+}
+if ($cleanArchitectureSkillContent -notmatch [regex]::Escape('Do not apply this skill to a conventional controller/model/repository API')) {
+    $errors += 'architecture-clean skill must reject conventional layered APIs without stronger architecture evidence.'
+}
+if ($simpleLayeredSkillContent -notmatch [regex]::Escape('controller/model/repository') -or
+    $simpleLayeredSkillContent -notmatch [regex]::Escape('do not add layers')) {
+    $errors += 'architecture-simple-layered skill must describe pragmatic layered boundaries and avoid architecture inflation.'
 }
 foreach ($commandName in @('quick-fix', 'small-task')) {
     $commandContent = Get-Content -LiteralPath (Join-Path $workflowRoot "template\.opencode\commands\$commandName.md") -Raw

@@ -128,6 +128,7 @@ function Get-LocalExcludePatterns {
     $sharedPaths = @('.ai/project-rules.md', '.ai/project.json')
     $generatedPaths = @(
         '.ai/bootstrap-input.json',
+        '.ai/bootstrap-proposal/',
         '.ai/generated-skills.json',
         '.ai/pr-draft.md',
         '.ai/project-profile.json',

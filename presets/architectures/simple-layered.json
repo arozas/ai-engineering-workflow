@@ -1,0 +1,5 @@
+{
+  "id": "simple-layered",
+  "contextSkills": ["architecture-simple-layered"],
+  "description": "Pragmatic controller/service/repository layered application"
+}
