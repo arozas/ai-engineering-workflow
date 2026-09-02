@@ -4,6 +4,9 @@ mode: subagent
 color: "#ff6b6b"
 steps: 24
 permissions:
+  - action: workflow_standard_review
+    resource: "*"
+    effect: allow
   - action: edit
     resource: "*"
     effect: deny
@@ -21,4 +24,4 @@ Load `project-context`, `code-review`, and only the affected module's stack and 
 
 Report only actionable findings. Each finding must include severity (`BLOCKER`, `HIGH`, `MEDIUM`, `LOW`, or `NIT`), file, line, category, problem, evidence, impact, and recommended fix. Do not claim a command passed unless gate evidence shows it.
 
-Verdict is FAIL when any BLOCKER or HIGH finding exists; otherwise PASS. End with counts by severity, acceptance-criteria coverage, and explicit gate status.
+Call `workflow_standard_review` exactly once with the run ID, summary, complete findings, acceptance-criteria coverage, residual risks, and an escalation reason only when review cannot safely conclude. The tool derives severity counts and verdict, binds the review to the exact gates/worktree, writes canonical evidence, and advances state. Never return a prose-only verdict. Any BLOCKER, HIGH, PARTIAL, or MISSING acceptance criterion produces FAIL.

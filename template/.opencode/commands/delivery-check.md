@@ -1,5 +1,5 @@
 ---
-description: Assess whether the approved change is ready for branch, commit, push, or draft PR delivery
+description: Assess whether the approved change is ready for commit, push, or draft PR delivery
 agent: orchestrator
 ---
 

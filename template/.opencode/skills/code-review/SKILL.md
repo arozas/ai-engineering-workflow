@@ -26,4 +26,4 @@ For each actionable finding report:
 - Impact
 - Recommended fix
 
-Any BLOCKER or HIGH yields `VERDICT: FAIL`; otherwise `VERDICT: PASS`. Include severity counts, acceptance-criteria coverage, gate status, and residual risks. Do not edit files.
+Do not calculate or merely print a verdict. Submit the complete structured review through the exclusive typed review tool assigned to the active reviewer role. That tool derives FAIL from any BLOCKER, HIGH, PARTIAL, or MISSING acceptance criterion, derives ESCALATE only from an explicit escalation reason, and otherwise derives PASS. Include acceptance-criteria coverage, gate status, and residual risks. Do not edit files or author the persisted review artifact directly.

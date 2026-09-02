@@ -48,6 +48,9 @@ foreach ($required in @(
     'template\.ai\workflow-installation.schema.json',
     'template\.ai\workflow-run.schema.json',
     'template\.ai\quality-gates.schema.json',
+    'template\.ai\review-evidence.schema.json',
+    'template\.ai\branch-evidence.schema.json',
+    'template\.ai\commit-evidence.schema.json',
     'template\.ai\publish-evidence.schema.json',
     'template\.ai\pull-request-evidence.schema.json',
     'template\.ai\diagnosis.schema.json',
@@ -57,8 +60,10 @@ foreach ($required in @(
     'template\.ai\scripts\validate-project.ps1',
     'template\.ai\scripts\workflow-state.ps1',
     'template\.ai\scripts\run-quality-gates.ps1',
+    'template\.ai\scripts\record-review.ps1',
     'template\.ai\scripts\validate-diagnosis.ps1',
     'template\.ai\scripts\validate-commit-message.ps1',
+    'template\.ai\scripts\create-branch.ps1',
     'template\.ai\scripts\commit-approved.ps1',
     'template\.ai\scripts\publish-approved.ps1',
     'template\.ai\scripts\create-draft-pr.ps1',
@@ -130,7 +135,7 @@ $openCodeConfigContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'temp
 if ($openCodeConfigContent -notmatch [regex]::Escape('"action": "workflow_*", "resource": "*", "effect": "deny"')) {
     $errors += 'opencode.json must deny custom workflow tools by default.'
 }
-foreach ($managedScript in @('delivery-check.ps1', 'fast-path-check.ps1', 'validate-project.ps1', 'workflow-state.ps1', 'profile-project.ps1', 'validate-diagnosis.ps1', 'run-quality-gates.ps1')) {
+foreach ($managedScript in @('delivery-check.ps1', 'fast-path-check.ps1', 'validate-project.ps1', 'workflow-state.ps1', 'profile-project.ps1', 'validate-diagnosis.ps1', 'run-quality-gates.ps1', 'record-review.ps1')) {
     $unsafePattern = '(?m)"action":\s*"shell"[^\r\n]*' + [regex]::Escape($managedScript) + '[^\r\n]*"effect":\s*"allow"'
     if ($openCodeConfigContent -match $unsafePattern) {
         $errors += "opencode.json must not automatically allow managed script $managedScript through a raw shell pattern."
@@ -144,6 +149,7 @@ foreach ($sensitivePattern in @('*.npmrc', '*.pypirc', '*.pem', '*.key', '*crede
 $quickFixAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\quick-fix.md') -Raw
 $developerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\developer.md') -Raw
 $quickReviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\quick-reviewer.md') -Raw
+$reviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\reviewer.md') -Raw
 $orchestratorAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\orchestrator.md') -Raw
 $deliveryAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\delivery.md') -Raw
 if ($quickFixAgentContent -notmatch '(?m)^steps:\s*16\s*$') {
@@ -169,14 +175,26 @@ if ($quickFixAgentContent -notmatch '(?ms)- action:\s*edit\s+resource:\s*"\.ai/r
 if ($orchestratorAgentContent -notmatch '(?ms)- action:\s*edit\s+resource:\s*"\.ai/runtime/\*/gates\.json"\s+effect:\s*deny') {
     $errors += 'orchestrator must not write deterministic gate evidence directly.'
 }
-foreach ($deliveryArtifact in @('commit.json', 'publish.json', 'pull-request.json')) {
+foreach ($agentDefinition in @{
+    'orchestrator' = $orchestratorAgentContent
+    'quick-fix' = $quickFixAgentContent
+}.GetEnumerator()) {
+    if ($agentDefinition.Value -notmatch '(?ms)- action:\s*edit\s+resource:\s*"\.ai/runtime/\*/review\.json"\s+effect:\s*deny') {
+        $errors += "$($agentDefinition.Key) must not write independent review evidence directly."
+    }
+}
+foreach ($deliveryArtifact in @('publish.json', 'pull-request.json')) {
     $pattern = '(?ms)- action:\s*edit\s+resource:\s*"\.ai/runtime/\*/' + [regex]::Escape($deliveryArtifact) + '"\s+effect:\s*allow'
     if ($deliveryAgentContent -notmatch $pattern) {
         $errors += "delivery must be able to stage its validated run-specific evidence file: $deliveryArtifact."
     }
 }
+$deliveryCommitEditPattern = '(?ms)- action:\s*edit\s+resource:\s*"\.ai/runtime/\*/commit\.json"\s+effect:\s*allow'
+if ($deliveryAgentContent -match $deliveryCommitEditPattern) {
+    $errors += 'delivery must not author commit evidence directly; commit-approved.ps1 owns it.'
+}
 $typedToolContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\tools\workflow.ts') -Raw
-foreach ($toolExport in @('state', 'gate', 'fast_path', 'validate_project', 'profile_project', 'validate_diagnosis', 'delivery_check')) {
+foreach ($toolExport in @('state', 'standard_review', 'quick_review', 'gate', 'fast_path', 'validate_project', 'profile_project', 'validate_diagnosis', 'delivery_check')) {
     if ($typedToolContent -notmatch [regex]::Escape("export const $toolExport = tool")) {
         $errors += "Typed workflow tool is missing export: $toolExport."
     }
@@ -191,12 +209,20 @@ foreach ($agentToolRequirement in @{
     'developer workflow_gate' = @($developerAgentContent, 'workflow_gate')
     'quick-fix workflow_fast_path' = @($quickFixAgentContent, 'workflow_fast_path')
     'quick-fix workflow_state' = @($quickFixAgentContent, 'workflow_state')
+    'reviewer workflow_standard_review' = @($reviewerAgentContent, 'workflow_standard_review')
+    'quick-reviewer workflow_quick_review' = @($quickReviewerAgentContent, 'workflow_quick_review')
 }.GetEnumerator()) {
     $content = $agentToolRequirement.Value[0]
     $action = $agentToolRequirement.Value[1]
     if ($content -notmatch ('(?ms)- action:\s*' + [regex]::Escape($action) + '\s+resource:\s*"\*"\s+effect:\s*allow')) {
         $errors += "$($agentToolRequirement.Key) must be explicitly allowed."
     }
+}
+if ($reviewerAgentContent -match '(?ms)- action:\s*(workflow_state|workflow_quick_review)\s+resource:\s*"\*"\s+effect:\s*allow') {
+    $errors += 'reviewer must receive only the standard review transition capability.'
+}
+if ($quickReviewerAgentContent -match '(?ms)- action:\s*(workflow_state|workflow_standard_review)\s+resource:\s*"\*"\s+effect:\s*allow') {
+    $errors += 'quick-reviewer must receive only the fast-path review transition capability.'
 }
 $qualityRunnerContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\run-quality-gates.ps1') -Raw
 $workflowStateContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\workflow-state.ps1') -Raw
@@ -212,9 +238,30 @@ $runnerPreamble = $qualityRunnerContent.Substring(0, $qualityRunnerContent.Index
 if ($runnerPreamble -match '\$ModuleId') {
     $errors += 'Quality-gate runner must derive modules from persisted run state, not caller-selected ModuleId input.'
 }
-foreach ($requiredStateToken in @('Resolve-RunRuntimeArtifact', 'Get-ValidatedGateEvidence', 'Get-ValidatedPublishEvidence', 'Get-ValidatedPullRequestEvidence', 'ls-remote', 'ghCommand.Source pr view', 'Get-ControlPlaneFingerprint', 'Assert-ControlPlane', 'affectedModuleIds', 'matrixSha256', 'Quality-gate command mismatch')) {
+foreach ($requiredStateToken in @('Resolve-RunRuntimeArtifact', 'Get-ValidatedGateEvidence', 'Get-ValidatedReviewEvidence', 'Get-ValidatedBranchEvidence', 'Get-ValidatedCommitEvidence', 'Get-ValidatedPublishEvidence', 'Get-ValidatedPullRequestEvidence', 'ls-remote', 'ghCommand.Source pr view', 'Get-ControlPlaneFingerprint', 'Assert-ControlPlane', 'affectedModuleIds', 'matrixSha256', 'Quality-gate command mismatch', 'validate-commit-message.ps1')) {
     if ($workflowStateContent -notmatch [regex]::Escape($requiredStateToken)) {
         $errors += "Workflow state is missing deterministic protection: $requiredStateToken."
+    }
+}
+if ($typedToolContent -match '(?s)export const state = tool\(\{.*?action:\s*tool\.schema\.enum\(\[[^\]]*"RecordReview"') {
+    $errors += 'Generic workflow_state must not expose RecordReview; only reviewer-scoped tools may persist review verdicts.'
+}
+$reviewRecorderContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\record-review.ps1') -Raw
+foreach ($reviewToken in @('review-evidence.schema.json', 'gateEvidenceSha256', 'severityCounts', 'acceptanceCriteriaCoverage', '-Action RecordReview', 'quick-reviewer')) {
+    if ($reviewRecorderContent -notmatch [regex]::Escape($reviewToken)) {
+        $errors += "Review recorder is missing a required identity or derived-verdict contract: $reviewToken."
+    }
+}
+$branchScriptContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\create-branch.ps1') -Raw
+$commitScriptContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\commit-approved.ps1') -Raw
+foreach ($scriptContract in @{
+    'create-branch RunId' = @($branchScriptContent, '[string]$RunId')
+    'create-branch evidence' = @($branchScriptContent, '-Action RecordBranch')
+    'commit-approved RunId' = @($commitScriptContent, '[string]$RunId')
+    'commit-approved evidence' = @($commitScriptContent, '-Action RecordCommit')
+}.GetEnumerator()) {
+    if ($scriptContract.Value[0] -notmatch [regex]::Escape($scriptContract.Value[1])) {
+        $errors += "$($scriptContract.Key) contract is missing."
     }
 }
 
@@ -224,9 +271,15 @@ if ($installOutputContent -match '(?m)^.*opencode2.*$') {
     $errors += 'Onboarding scripts must invoke the official opencode executable name.'
 }
 $openCodeSmokeContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\smoke-opencode.ps1') -Raw
-foreach ($smokeToken in @('/global/health', '/agent', '/command', '/experimental/tool/ids', 'workflow_state', 'workflow_gate')) {
+foreach ($smokeToken in @('/global/health', '/agent', '/command', '/experimental/tool/ids', 'workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate')) {
     if ($openCodeSmokeContent -notmatch [regex]::Escape($smokeToken)) {
         $errors += "OpenCode smoke test is missing discovery check: $smokeToken."
+    }
+}
+$ciContent = Get-Content -LiteralPath (Join-Path $workflowRoot '.github\workflows\validate.yml') -Raw
+foreach ($ciToken in @('SUPPORTED_OPENCODE_VERSION: 1.18.26', 'opencode-ai@$env:SUPPORTED_OPENCODE_VERSION', 'opencode-latest-canary:', 'continue-on-error: true', 'opencode-ai@latest')) {
+    if ($ciContent -notmatch [regex]::Escape($ciToken)) {
+        $errors += "CI is missing supported-version or latest-canary contract: $ciToken."
     }
 }
 
@@ -234,7 +287,6 @@ $readmePath = Join-Path $workflowRoot 'README.md'
 if ((Get-Content -LiteralPath $readmePath).Count -gt 350) {
     $errors += 'README.md must remain a concise entry point; detailed guidance belongs under docs/.'
 }
-$reviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\reviewer.md') -Raw
 $diagnosticianAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\diagnostician.md') -Raw
 foreach ($reviewDefinition in @{
     'reviewer' = $reviewerAgentContent

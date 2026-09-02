@@ -41,6 +41,7 @@
       ]
     },
     "baseSha": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|UNBORN)$" },
+    "baseBranch": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$" },
     "currentSha": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|UNBORN)$" },
     "worktreeFingerprint": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
     "controlPlaneFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },

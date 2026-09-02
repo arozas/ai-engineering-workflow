@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  SUPPORTED_OPENCODE_VERSION: 1.18.26
+
 jobs:
   validate:
     runs-on: windows-latest
@@ -25,10 +28,26 @@ jobs:
         shell: pwsh
         run: ./tests/Run-Tests.ps1
 
-      - name: Install current OpenCode CLI
+      - name: Install supported OpenCode CLI
+        shell: pwsh
+        run: npm install --global "opencode-ai@$env:SUPPORTED_OPENCODE_VERSION"
+
+      - name: Smoke-test supported OpenCode discovery
+        shell: pwsh
+        run: ./scripts/smoke-opencode.ps1
+
+  opencode-latest-canary:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install latest OpenCode CLI canary
         shell: pwsh
         run: npm install --global opencode-ai@latest
 
-      - name: Smoke-test OpenCode discovery
+      - name: Smoke-test latest OpenCode discovery
         shell: pwsh
         run: ./scripts/smoke-opencode.ps1

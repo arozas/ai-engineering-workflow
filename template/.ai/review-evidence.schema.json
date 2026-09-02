@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI Engineering Workflow independent review evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "runId",
+    "reviewerRole",
+    "workflowPath",
+    "currentSha",
+    "worktreeFingerprint",
+    "gateEvidenceSha256",
+    "reviewedAtUtc",
+    "summary",
+    "findings",
+    "severityCounts",
+    "acceptanceCriteriaCoverage",
+    "gateStatus",
+    "residualRisks",
+    "escalationReason",
+    "verdict"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+    "reviewerRole": { "enum": ["reviewer", "quick-reviewer"] },
+    "workflowPath": { "enum": ["standard", "fast-path"] },
+    "currentSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "worktreeFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "gateEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "reviewedAtUtc": { "type": "string", "format": "date-time" },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "findings": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "severityCounts": { "$ref": "#/$defs/severityCounts" },
+    "acceptanceCriteriaCoverage": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 30,
+      "items": { "$ref": "#/$defs/coverage" }
+    },
+    "gateStatus": { "const": "PASS" },
+    "residualRisks": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+    },
+    "escalationReason": { "type": ["string", "null"], "minLength": 1, "maxLength": 2000 },
+    "verdict": { "enum": ["PASS", "FAIL", "ESCALATE"] }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "file", "line", "category", "problem", "evidence", "impact", "recommendedFix"],
+      "properties": {
+        "severity": { "enum": ["BLOCKER", "HIGH", "MEDIUM", "LOW", "NIT"] },
+        "file": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": "^(?![A-Za-z]:[\\/])(?![\\/])(?!.*(?:^|[\\/])\\.\\.(?:[\\/]|$)).+$" },
+        "line": { "type": ["integer", "null"], "minimum": 1 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "problem": { "type": "string", "minLength": 1, "maxLength": 1500 },
+        "evidence": { "type": "string", "minLength": 1, "maxLength": 1500 },
+        "impact": { "type": "string", "minLength": 1, "maxLength": 1500 },
+        "recommendedFix": { "type": "string", "minLength": 1, "maxLength": 1500 }
+      }
+    },
+    "severityCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["BLOCKER", "HIGH", "MEDIUM", "LOW", "NIT"],
+      "properties": {
+        "BLOCKER": { "type": "integer", "minimum": 0, "maximum": 20 },
+        "HIGH": { "type": "integer", "minimum": 0, "maximum": 20 },
+        "MEDIUM": { "type": "integer", "minimum": 0, "maximum": 20 },
+        "LOW": { "type": "integer", "minimum": 0, "maximum": 20 },
+        "NIT": { "type": "integer", "minimum": 0, "maximum": 20 }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criterion", "status", "evidence"],
+      "properties": {
+        "criterion": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "status": { "enum": ["COVERED", "PARTIAL", "MISSING"] },
+        "evidence": { "type": "string", "minLength": 1, "maxLength": 1500 }
+      }
+    }
+  }
+}

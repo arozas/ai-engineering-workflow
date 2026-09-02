@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Start', 'ApprovePlan', 'BeginImplementation', 'RecordGates', 'RecordReview', 'BeginCorrection', 'RecordDiagnosis', 'BeginDiagnosticIteration', 'RecordCommit', 'RecordPublish', 'RecordPullRequest', 'Escalate', 'Show', 'Validate')]
+    [ValidateSet('Start', 'ApprovePlan', 'RecordBranch', 'BeginImplementation', 'RecordGates', 'RecordReview', 'BeginCorrection', 'RecordDiagnosis', 'BeginDiagnosticIteration', 'RecordCommit', 'RecordPublish', 'RecordPullRequest', 'Escalate', 'Show', 'Validate')]
     [string]$Action,
     [Parameter(Mandatory = $true)][ValidatePattern('^[a-z0-9][a-z0-9-]{2,63}$')][string]$RunId,
     [ValidateSet('standard', 'fast-path', 'diagnostic')][string]$WorkflowPath,
@@ -278,6 +278,135 @@ function Get-ValidatedGateEvidence([string]$SourcePath, [string]$RepositoryRoot,
     }
 }
 
+function Get-ValidatedReviewEvidence(
+    [string]$SourcePath,
+    [string]$RepositoryRoot,
+    [System.Collections.IDictionary]$State
+) {
+    $reviewSchemaPath = Join-Path $RepositoryRoot '.ai\review-evidence.schema.json'
+    if (-not (Test-Path -LiteralPath $reviewSchemaPath -PathType Leaf)) { throw "Review evidence schema not found: $reviewSchemaPath" }
+    $json = Get-Content -LiteralPath $SourcePath -Raw
+    $schema = Get-Content -LiteralPath $reviewSchemaPath -Raw
+    if (-not ($json | Test-Json -Schema $schema -ErrorAction Stop)) { throw 'Review evidence failed schema validation.' }
+    $evidence = $json | ConvertFrom-Json -AsHashtable
+
+    if ([string]$evidence.runId -ne [string]$State.runId) { throw 'Review evidence belongs to a different workflow run.' }
+    if ([string]$evidence.workflowPath -ne [string]$State.workflowPath) { throw 'Review evidence belongs to a different workflow path.' }
+    $expectedRole = if ([string]$State.workflowPath -eq 'fast-path') { 'quick-reviewer' } else { 'reviewer' }
+    if ([string]$evidence.reviewerRole -ne $expectedRole) { throw "Review evidence must be produced by '$expectedRole'." }
+    if ([string]$evidence.currentSha -ne [string]$State.currentSha) { throw 'Review evidence was produced for a different Git SHA.' }
+    if ([string]$evidence.worktreeFingerprint -ne [string]$State.worktreeFingerprint) { throw 'Review evidence was produced for a different worktree fingerprint.' }
+    if (-not $State.artifacts.Contains('gates') -or [string]$State.artifacts.gates.verdict -ne 'PASS') {
+        throw 'Review evidence requires persisted passing gates.'
+    }
+    $gatePath = Join-Path (Join-Path $RepositoryRoot ".ai\runs\$($State.runId)") ([string]$State.artifacts.gates.path)
+    if (-not (Test-Path -LiteralPath $gatePath -PathType Leaf)) { throw 'Canonical gate evidence is missing.' }
+    $gateHash = Get-FileSha256 -Path $gatePath
+    if ($gateHash -ne [string]$State.artifacts.gates.sha256 -or $gateHash -ne [string]$evidence.gateEvidenceSha256) {
+        throw 'Review evidence is not bound to the canonical gate artifact.'
+    }
+
+    $derivedCounts = [ordered]@{ BLOCKER = 0; HIGH = 0; MEDIUM = 0; LOW = 0; NIT = 0 }
+    foreach ($finding in @($evidence.findings)) {
+        $severity = [string]$finding.severity
+        if (-not $derivedCounts.Contains($severity)) { throw "Unsupported review severity: $severity" }
+        $derivedCounts[$severity] = [int]$derivedCounts[$severity] + 1
+    }
+    foreach ($severity in $derivedCounts.Keys) {
+        if ([int]$evidence.severityCounts[$severity] -ne [int]$derivedCounts[$severity]) {
+            throw "Review severity count mismatch for '$severity'."
+        }
+    }
+    $escalationReason = if ($null -eq $evidence.escalationReason) { '' } else { [string]$evidence.escalationReason }
+    $incompleteCoverage = @($evidence.acceptanceCriteriaCoverage | Where-Object { [string]$_.status -ne 'COVERED' }).Count -gt 0
+    $derivedVerdict = if (-not [string]::IsNullOrWhiteSpace($escalationReason)) {
+        'ESCALATE'
+    }
+    elseif ([int]$derivedCounts.BLOCKER -gt 0 -or [int]$derivedCounts.HIGH -gt 0 -or $incompleteCoverage) {
+        'FAIL'
+    }
+    else { 'PASS' }
+    if ([string]$evidence.verdict -ne $derivedVerdict) { throw 'Review verdict does not match its findings and acceptance-criteria coverage.' }
+    return [pscustomobject]@{ Verdict = $derivedVerdict; EscalationReason = $escalationReason }
+}
+
+function Get-ValidatedBranchEvidence(
+    [string]$SourcePath,
+    [string]$RepositoryRoot,
+    [System.Collections.IDictionary]$State
+) {
+    $schemaPath = Join-Path $RepositoryRoot '.ai\branch-evidence.schema.json'
+    if (-not (Test-Path -LiteralPath $schemaPath -PathType Leaf)) { throw "Branch evidence schema not found: $schemaPath" }
+    $json = Get-Content -LiteralPath $SourcePath -Raw
+    $schema = Get-Content -LiteralPath $schemaPath -Raw
+    if (-not ($json | Test-Json -Schema $schema -ErrorAction Stop)) { throw 'Branch evidence failed schema validation.' }
+    $evidence = $json | ConvertFrom-Json
+
+    if (-not $State.Contains('baseBranch') -or [string]::IsNullOrWhiteSpace([string]$State.baseBranch)) {
+        throw 'This run predates branch evidence. Start a new run before creating a managed branch.'
+    }
+    $currentBranch = (& git -C $RepositoryRoot branch --show-current).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($currentBranch)) { throw 'Branch evidence requires a named current branch.' }
+    $currentSha = Get-CurrentSha -RepositoryRoot $RepositoryRoot
+    $status = @(& git -C $RepositoryRoot status --porcelain=v1 --untracked-files=all)
+    if ($LASTEXITCODE -ne 0 -or $status.Count -gt 0) { throw 'Branch evidence requires a clean working tree.' }
+    if ([string]$evidence.runId -ne [string]$State.runId) { throw 'Branch evidence belongs to a different workflow run.' }
+    if ([string]$evidence.previousBranch -ne [string]$State.baseBranch) { throw 'Branch evidence does not start from the run base branch.' }
+    if ([string]$evidence.branch -ne $currentBranch) { throw 'Branch evidence does not match the current branch.' }
+    if ([string]$evidence.branch -eq [string]$evidence.previousBranch) { throw 'Branch evidence must describe a newly created branch.' }
+    if ($currentBranch -match '^(main|master|develop|development|trunk|release)(/|$)') {
+        throw "Branch evidence targets protected or shared branch '$currentBranch'."
+    }
+    if ([string]$evidence.sha -ne $currentSha -or [string]$evidence.sha -ne [string]$State.currentSha) {
+        throw 'Branch evidence SHA does not match the persisted run and current HEAD.'
+    }
+    return $evidence
+}
+
+function Get-ValidatedCommitEvidence(
+    [string]$SourcePath,
+    [string]$RepositoryRoot,
+    [System.Collections.IDictionary]$State,
+    [string]$CommitSha
+) {
+    $schemaPath = Join-Path $RepositoryRoot '.ai\commit-evidence.schema.json'
+    if (-not (Test-Path -LiteralPath $schemaPath -PathType Leaf)) { throw "Commit evidence schema not found: $schemaPath" }
+    $json = Get-Content -LiteralPath $SourcePath -Raw
+    $schema = Get-Content -LiteralPath $schemaPath -Raw
+    if (-not ($json | Test-Json -Schema $schema -ErrorAction Stop)) { throw 'Commit evidence failed schema validation.' }
+    $evidence = $json | ConvertFrom-Json
+
+    $branch = (& git -C $RepositoryRoot branch --show-current).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($branch)) { throw 'Commit evidence requires a named current branch.' }
+    if ($branch -match '^(main|master|develop|development|trunk|release)(/|$)') {
+        throw "Commit evidence targets protected or shared branch '$branch'."
+    }
+    if ([string]$evidence.runId -ne [string]$State.runId) { throw 'Commit evidence belongs to a different workflow run.' }
+    if ([string]$evidence.sha -ne $CommitSha) { throw 'Commit evidence SHA does not match current HEAD.' }
+    if ([string]$evidence.parentSha -ne [string]$State.currentSha) { throw 'Commit evidence parent does not match the reviewed run SHA.' }
+    if ([string]$evidence.branch -ne $branch) { throw 'Commit evidence branch does not match the current branch.' }
+
+    $actualMessage = ((& git -C $RepositoryRoot log -1 --pretty=%B $CommitSha) -join "`n").Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to read the recorded commit message.' }
+    $messageValidator = Join-Path $RepositoryRoot '.ai\scripts\validate-commit-message.ps1'
+    & $messageValidator -Message $actualMessage | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Actual commit message failed conventional-commit validation.' }
+    if ([string]$evidence.message -ne $actualMessage) { throw 'Commit evidence message does not match the actual commit message.' }
+
+    $actualFiles = @(
+        & git -C $RepositoryRoot diff-tree --root --no-commit-id --name-only --no-renames -r $CommitSha -- |
+            ForEach-Object { ([string]$_).Replace('\', '/') } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique
+    )
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect files in the recorded commit.' }
+    $evidenceFiles = @($evidence.files | ForEach-Object { ([string]$_).Replace('\', '/') } | Sort-Object -Unique)
+    if ($actualFiles.Count -ne $evidenceFiles.Count -or @(Compare-Object -ReferenceObject $actualFiles -DifferenceObject $evidenceFiles).Count -gt 0) {
+        throw 'Commit evidence file list does not match the actual commit.'
+    }
+    return $evidence
+}
+
 function Get-ValidatedPublishEvidence(
     [string]$SourcePath,
     [string]$RepositoryRoot,
@@ -465,6 +594,8 @@ if ($Action -eq 'Start') {
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
     $now = [DateTime]::UtcNow.ToString('o')
     $sha = Get-CurrentSha -RepositoryRoot $repositoryRoot
+    $baseBranch = (& git -C $repositoryRoot branch --show-current).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($baseBranch)) { $baseBranch = $null }
     $maximumCorrections = 1
     $maximumDiagnosticIterations = 3
     $projectPath = Join-Path $repositoryRoot '.ai\project.json'
@@ -491,6 +622,7 @@ if ($Action -eq 'Start') {
         taskType = $TaskType
         status = if ($WorkflowPath -eq 'diagnostic') { 'DIAGNOSING' } else { 'PLANNING' }
         sourceRunId = if ([string]::IsNullOrWhiteSpace($SourceRunId)) { $null } else { $SourceRunId }
+        baseBranch = $baseBranch
         baseSha = $sha
         currentSha = $sha
         worktreeFingerprint = $null
@@ -528,6 +660,16 @@ else {
             $state.status = 'PLAN_APPROVED'
             Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath
         }
+        'RecordBranch' {
+            Assert-Status -State $state -Allowed @('PLAN_APPROVED')
+            Assert-Head -State $state -RepositoryRoot $repositoryRoot
+            Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
+            if ($state.artifacts.Contains('branch')) { throw 'This workflow run already contains branch evidence.' }
+            $source = Resolve-RunRuntimeArtifact -RepositoryRoot $repositoryRoot -RunId $RunId -Path $ArtifactPath -FileName 'branch.json'
+            Get-ValidatedBranchEvidence -SourcePath $source -RepositoryRoot $repositoryRoot -State $state | Out-Null
+            Add-Artifact -State $state -Name 'branch' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict 'PASS'
+            Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath
+        }
         'BeginImplementation' {
             Assert-Status -State $state -Allowed @('PLAN_APPROVED')
             Assert-Head -State $state -RepositoryRoot $repositoryRoot
@@ -554,17 +696,18 @@ else {
             Assert-Status -State $state -Allowed @('GATES_PASSED')
             Assert-Head -State $state -RepositoryRoot $repositoryRoot
             Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
-            if ([string]::IsNullOrWhiteSpace($Verdict)) { throw 'RecordReview requires a verdict.' }
             $currentFingerprint = Get-WorktreeFingerprint -RepositoryRoot $repositoryRoot -CurrentSha ([string]$state.currentSha)
             if ($currentFingerprint -ne [string]$state.worktreeFingerprint) { throw 'Worktree changed after gates; rerun the complete gate before review.' }
-            $source = Resolve-RunRuntimeArtifact -RepositoryRoot $repositoryRoot -RunId $RunId -Path $ArtifactPath -FileName 'review.md'
-            Add-Artifact -State $state -Name 'review' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict $Verdict
-            $state.status = switch ($Verdict) {
+            $source = Resolve-RunRuntimeArtifact -RepositoryRoot $repositoryRoot -RunId $RunId -Path $ArtifactPath -FileName 'review.json'
+            $reviewEvidence = Get-ValidatedReviewEvidence -SourcePath $source -RepositoryRoot $repositoryRoot -State $state
+            if ([string]$Verdict -ne [string]$reviewEvidence.Verdict) { throw 'RecordReview verdict does not match derived review evidence.' }
+            Add-Artifact -State $state -Name 'review' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict ([string]$reviewEvidence.Verdict)
+            $state.status = switch ([string]$reviewEvidence.Verdict) {
                 'PASS' { 'READY_FOR_DELIVERY' }
                 'FAIL' { 'REVIEW_FAILED' }
                 'ESCALATE' { 'ESCALATED' }
             }
-            if ($Verdict -eq 'ESCALATE') { $state.escalationReason = if ($Reason) { $Reason } else { 'Independent review required escalation.' } }
+            if ([string]$reviewEvidence.Verdict -eq 'ESCALATE') { $state.escalationReason = [string]$reviewEvidence.EscalationReason }
             Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath
         }
         'BeginCorrection' {
@@ -638,6 +781,7 @@ else {
             $committedFingerprint = Get-CommitFingerprint -RepositoryRoot $repositoryRoot -ParentSha ([string]$state.currentSha) -CommitSha $newSha
             if ($committedFingerprint -ne [string]$state.worktreeFingerprint) { throw 'Committed diff does not match the gate-reviewed worktree fingerprint.' }
             $source = Resolve-RunRuntimeArtifact -RepositoryRoot $repositoryRoot -RunId $RunId -Path $ArtifactPath -FileName 'commit.json'
+            Get-ValidatedCommitEvidence -SourcePath $source -RepositoryRoot $repositoryRoot -State $state -CommitSha $newSha | Out-Null
             Add-Artifact -State $state -Name 'commit' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict 'PASS'
             $state.currentSha = $newSha
             $state.status = 'COMMITTED'

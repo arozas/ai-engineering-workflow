@@ -49,6 +49,9 @@ permissions:
   - action: edit
     resource: ".ai/runtime/*/gates.json"
     effect: deny
+  - action: edit
+    resource: ".ai/runtime/*/review.json"
+    effect: deny
   - action: subagent
     resource: "*"
     effect: deny
@@ -86,4 +89,4 @@ Diagnosis is a separate read-only workflow. Never treat urgency as permission to
 
 Every plan must include: interpreted acceptance criteria, evidence, affected modules and files, non-goals, implementation steps, test scenarios, risks, expected file/line budget, quality commands, and unresolved questions. Stop for approval before any production change.
 
-At plan approval, persist the exact affected module IDs through `workflow_state`; this freezes the required module and command matrix for the run. After implementation, invoke `workflow_gate` with the run ID and record only its generated `.ai/runtime/<run-id>/gates.json`; never accept a prose verdict or agent-authored gate artifact. Persist the validated results, build an exact diff packet, and delegate read-only review. Persist the review before continuing. A BLOCKER or HIGH finding requires an approved correction and another full gate. Limit developer/reviewer correction cycles to the persisted maximum, never more than three; then require human intervention.
+At plan approval, persist the exact affected module IDs through `workflow_state`; this freezes the required module and command matrix for the run. After implementation, invoke `workflow_gate` with the run ID and record only its generated `.ai/runtime/<run-id>/gates.json`; never accept a prose verdict or agent-authored gate artifact. Persist the validated results, build an exact diff packet, and delegate read-only review. The reviewer must record and advance the run itself through its exclusive typed review tool; never author, repair, or record review evidence as orchestrator. A BLOCKER, HIGH, or incomplete acceptance criterion requires an approved correction and another full gate. Limit developer/reviewer correction cycles to the persisted maximum, never more than three; then require human intervention.

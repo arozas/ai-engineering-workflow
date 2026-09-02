@@ -1,4 +1,5 @@
 import path from "node:path"
+import { mkdir, rm, writeFile } from "node:fs/promises"
 import { tool } from "@opencode-ai/plugin"
 
 type ToolContext = {
@@ -15,6 +16,32 @@ const relativePath = tool.schema
   .min(1)
   .max(500)
   .refine((value) => !path.isAbsolute(value), "Use a repository-relative path.")
+
+const reviewFinding = tool.schema.object({
+  severity: tool.schema.enum(["BLOCKER", "HIGH", "MEDIUM", "LOW", "NIT"]),
+  file: relativePath,
+  line: tool.schema.number().int().min(1).nullable(),
+  category: tool.schema.string().min(1).max(100),
+  problem: tool.schema.string().min(1).max(1500),
+  evidence: tool.schema.string().min(1).max(1500),
+  impact: tool.schema.string().min(1).max(1500),
+  recommendedFix: tool.schema.string().min(1).max(1500),
+})
+
+const reviewCoverage = tool.schema.object({
+  criterion: tool.schema.string().min(1).max(1000),
+  status: tool.schema.enum(["COVERED", "PARTIAL", "MISSING"]),
+  evidence: tool.schema.string().min(1).max(1500),
+})
+
+const reviewArgs = {
+  runId,
+  summary: tool.schema.string().min(1).max(2000),
+  findings: tool.schema.array(reviewFinding).max(20),
+  acceptanceCriteriaCoverage: tool.schema.array(reviewCoverage).min(1).max(30),
+  residualRisks: tool.schema.array(tool.schema.string().min(1).max(1000)).max(20),
+  escalationReason: tool.schema.string().min(1).max(2000).optional(),
+}
 
 function repositoryRoot(context: ToolContext): string {
   return path.resolve(context.worktree || context.directory)
@@ -63,6 +90,34 @@ async function invokePowerShell(
   )
 }
 
+async function recordReview(
+  reviewerRole: "reviewer" | "quick-reviewer",
+  input: { runId: string; [key: string]: unknown },
+  context: ToolContext,
+): Promise<string> {
+  const root = repositoryRoot(context)
+  const runtimeDirectory = path.join(root, ".ai", "runtime", input.runId)
+  const payloadPath = path.join(runtimeDirectory, "review-input.json")
+  await mkdir(runtimeDirectory, { recursive: true })
+  await writeFile(payloadPath, JSON.stringify(input), { encoding: "utf8" })
+  try {
+    return await invokePowerShell(
+      "record-review.ps1",
+      [
+        "-RunId",
+        input.runId,
+        "-ReviewerRole",
+        reviewerRole,
+        "-PayloadPath",
+        `.ai/runtime/${input.runId}/review-input.json`,
+      ],
+      context,
+    )
+  } finally {
+    await rm(payloadPath, { force: true })
+  }
+}
+
 export const state = tool({
   description: "Apply one validated transition to a persisted engineering workflow run.",
   args: {
@@ -71,7 +126,6 @@ export const state = tool({
       "ApprovePlan",
       "BeginImplementation",
       "RecordGates",
-      "RecordReview",
       "BeginCorrection",
       "Escalate",
       "RecordDiagnosis",
@@ -101,6 +155,22 @@ export const state = tool({
     addValue(args, "-Verdict", input.verdict)
     addValue(args, "-Reason", input.reason)
     return invokePowerShell("workflow-state.ps1", args, context)
+  },
+})
+
+export const standard_review = tool({
+  description: "Persist a schema-valid standard review and atomically advance its exact workflow run.",
+  args: reviewArgs,
+  async execute(input, context) {
+    return recordReview("reviewer", input, context)
+  },
+})
+
+export const quick_review = tool({
+  description: "Persist a schema-valid fast-path review and atomically advance its exact workflow run.",
+  args: reviewArgs,
+  async execute(input, context) {
+    return recordReview("quick-reviewer", input, context)
   },
 })
 

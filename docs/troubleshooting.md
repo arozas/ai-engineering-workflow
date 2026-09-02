@@ -119,6 +119,16 @@ Confirm:
 
 Each delivery operation needs fresh approval. Approval for commit is not approval for push or PR creation.
 
+## Branch evidence is rejected
+
+The guarded branch script requires the run to be `PLAN_APPROVED`, the current branch to equal the run's recorded `baseBranch`, HEAD to equal the run SHA, and the worktree to be clean. It then writes `.ai/runtime/<run-id>/branch.json` and records it while remaining in `PLAN_APPROVED`.
+
+If the branch was created but evidence recording failed, do not create another branch blindly. Inspect the reported branch, restore a clean matching state, and either reconcile the exact run or start a new run. Directly editing `branch.json` or `state.json` is not a supported recovery path.
+
+## Review evidence is rejected
+
+Only the reviewer-specific typed tool should create `review.json`. Rejection means the reviewer role or route was wrong, the gate/canonical artifact changed, the SHA or worktree no longer matches, severity counts are inconsistent, or acceptance coverage requires `FAIL`. Rerun the gate if the diff changed and delegate a fresh evidence packet; do not ask the orchestrator to record `RecordReview` directly.
+
 ## Publish or PR evidence is rejected
 
 `RecordPublish` requires schema-valid `.ai/runtime/<run-id>/publish.json`, then independently checks the named branch, current/persisted SHA, upstream, and exact remote ref with Git. Confirm the normal push completed, the branch still has the expected upstream, and no commit was added afterward.
@@ -133,7 +143,7 @@ Use a Conventional Commits subject, for example:
 fix(gates): bind evidence to the approved module matrix
 ```
 
-Keep the subject concise and imperative. Remove `Co-authored-by`, `Generated-by`, `by Claude`, `byclaude`, or any model/tool attribution. The delivery workflow never amends a pushed commit; history rewriting remains manual.
+Keep the subject concise and imperative. Remove `Co-authored-by`, `Generated-by`, `by Claude`, `byclaude`, or any model/tool attribution. State reads the final message from Git and compares it with `commit.json`, so editing only the evidence cannot bypass the rule. It also compares the exact changed-file list and parent SHA. The delivery workflow never amends a pushed commit; history rewriting remains manual.
 
 ## Update refuses a locally changed file
 
@@ -153,7 +163,7 @@ The workflow uses the current Node 24-based checkout action. If a runtime deprec
 
 ## OpenCode smoke discovery fails
 
-Run `opencode --version`, then execute `scripts/smoke-opencode.ps1` locally. The test does not call a model; it verifies the local server health and discovery endpoints. Failure usually means the installed OpenCode version cannot parse `opencode.json`, one Markdown definition has invalid frontmatter, or `.opencode/tools/workflow.ts` cannot load. Inspect the reported missing names or temporary server error, fix the distribution source, and rerun all validation layers.
+Run `opencode --version`, then execute `scripts/smoke-opencode.ps1` locally. The test does not call a model; it verifies the local server health and discovery endpoints, including both reviewer-specific tools. Failure usually means the installed OpenCode version cannot parse `opencode.json`, one Markdown definition has invalid frontmatter, or `.opencode/tools/workflow.ts` cannot load. Compare the local version with the supported CI pin, inspect the reported missing names or temporary server error, fix the distribution source, and rerun all validation layers. A failure limited to the non-blocking `latest` canary indicates upstream drift and does not invalidate the pinned supported lane.
 
 ## Collecting useful support evidence
 

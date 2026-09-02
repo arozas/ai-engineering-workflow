@@ -12,6 +12,6 @@ Propose:
 - current feature branch and HEAD
 - acceptance criteria represented by the commit
 
-The commit message must contain no AI-agent authorship, co-authorship, generation, or tool attribution. Wait for explicit approval of the exact file list and message. Then delegate one commit operation to `delivery`: stage only those file paths, inspect the cached diff, and use `.ai/scripts/commit-approved.ps1`.
+The commit message must contain no AI-agent authorship, co-authorship, generation, or tool attribution. Wait for explicit approval of the exact file list and message. Then delegate one commit operation to `delivery`: stage only those file paths, inspect the cached diff, and use `.ai/scripts/commit-approved.ps1 -RunId <run-id> -Subject <subject>` with the optional approved body.
 
-Write the resulting SHA, parent, exact paths, and final message to `.ai/runtime/<run-id>/commit.json`, call `RecordCommit`, report the persisted result, then stop. Do not push or create a pull request.
+The guarded script writes `.ai/runtime/<run-id>/commit.json`, independently validates the actual Git commit message and changed paths, and persists `RecordCommit`. Report the persisted SHA, parent, exact paths, and final message, then stop. Do not push or create a pull request.

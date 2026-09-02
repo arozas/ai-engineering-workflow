@@ -62,7 +62,7 @@ The runner writes `.ai/runtime/<run-id>/gates.json`. State accepts only that run
 
 ### Review
 
-The orchestrator constructs an exact packet from the requirement, plan, diff, and gates. The reviewer receives it without shell or edit access and reports findings by severity.
+The orchestrator constructs an exact packet from the requirement, plan, diff, and gates. The reviewer receives it without shell or edit access and reports structured findings plus acceptance-criteria coverage through its exclusive typed tool. The tool creates `review.json`, binds it to the current SHA, reviewed worktree, and canonical gate hash, derives the verdict, and records the transition atomically. The orchestrator cannot call `RecordReview` through its general state tool or author the canonical verdict.
 
 A `BLOCKER` or `HIGH` finding requires an approved correction, a full gate rerun, and another review. Project policy limits correction cycles to one through three. Exhausting the limit requires human intervention.
 
@@ -86,7 +86,7 @@ Before editing, the agent runs `workflow_fast_path` in `Estimate` mode and prese
 
 After implementation, it runs the frozen quality matrix and `workflow_fast_path` in `Actual` mode. Actual mode derives files, line counts, module mapping, untracked files, binary uncertainty, and conservative path risks from Git. Expansion returns `FAST PATH INVALIDATED`.
 
-The quick reviewer receives only the requirement, approved micro-plan, exact diff, gate results, and classifier output. A failed second review after the single correction allowance escalates to `/ticket`.
+The quick reviewer receives only the requirement, approved micro-plan, exact diff, gate results, and classifier output. It records through the separate `workflow_quick_review` capability; the standard reviewer uses `workflow_standard_review`. A failed second review after the single correction allowance escalates to `/ticket`.
 
 ## Production diagnosis
 
@@ -112,9 +112,9 @@ Delivery is split into single operations:
 4. `/publish` proposes a normal feature-branch push.
 5. `/pr-create` proposes a draft PR with explicit base and head.
 
-Each operation requires a fresh proposal, revalidation, and approval. Approval does not carry forward. The delivery agent stops after one operation and records evidence under `.ai/runtime/<run-id>/`.
+Each operation requires a fresh proposal, revalidation, and approval. Approval does not carry forward. The delivery agent stops after one operation and records evidence under `.ai/runtime/<run-id>/`. The branch script accepts the run ID and persists the previous branch, created branch, and SHA. The commit script accepts the run ID and owns both evidence generation and state recording.
 
-Commits stage exact paths only; broad staging, amend, and AI authorship trailers are forbidden. Publishing never force-pushes, pushes tags, deletes refs, or publishes a protected/shared branch. State independently verifies the published remote ref and SHA. PR creation does not add reviewers, labels, assignees, comments, merge, or auto-merge; state independently queries GitHub and requires the exact open draft PR metadata before recording success.
+Commits stage exact paths only; broad staging, amend, and AI authorship trailers are forbidden. State independently reads the actual commit message and changed paths, validates Conventional Commits, and compares them with `commit.json`; a fabricated evidence message cannot legitimize a nonconforming commit. Publishing never force-pushes, pushes tags, deletes refs, or publishes a protected/shared branch. State independently verifies the published remote ref and SHA. PR creation does not add reviewers, labels, assignees, comments, merge, or auto-merge; state independently queries GitHub and requires the exact open draft PR metadata before recording success.
 
 Merge, rebase, reset, release, deployment, secret mutation, and cloud mutation remain outside the workflow.
 

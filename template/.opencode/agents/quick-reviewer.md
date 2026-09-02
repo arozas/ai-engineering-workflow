@@ -4,6 +4,9 @@ mode: subagent
 color: "#fb7185"
 steps: 8
 permissions:
+  - action: workflow_quick_review
+    resource: "*"
+    effect: allow
   - action: edit
     resource: "*"
     effect: deny
@@ -21,4 +24,4 @@ Review only the original requirement, approved micro-plan, exact diff, determini
 
 Check correctness, regression risk, input validation, error handling, architecture boundaries, test adequacy, unnecessary complexity, and scope. Report actionable findings using the standard BLOCKER, HIGH, MEDIUM, LOW, or NIT structure with file, line, category, evidence, impact, and recommended fix.
 
-Return `FAST REVIEW PASS` only when gates passed, the actual classifier is eligible, and no BLOCKER or HIGH finding exists. Return `FAST REVIEW FAIL` for BLOCKER or HIGH findings. Return `ESCALATE STANDARD WORKFLOW` when eligibility is invalidated, evidence is incomplete, the design must change, or the task requires broader inspection.
+Call `workflow_quick_review` exactly once with the run ID, summary, complete findings, acceptance-criteria coverage, residual risks, and an escalation reason only when review cannot safely conclude. The tool derives the verdict, binds evidence to the exact gates/worktree, and advances state. Any BLOCKER, HIGH, PARTIAL, or MISSING acceptance criterion fails the review. Use escalation when eligibility is invalidated, evidence is incomplete, the design must change, or broader inspection is required. Never return a prose-only verdict.

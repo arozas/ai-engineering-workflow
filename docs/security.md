@@ -10,7 +10,7 @@ The workflow prevents an agent from converting a plausible narrative into unauth
 - persisted state and artifact hashes;
 - control-plane and worktree fingerprints;
 - an exact approved quality matrix;
-- independent read-only review;
+- independent read-only review with reviewer-exclusive evidence capabilities;
 - separately approved delivery operations;
 - run-isolated staging and independently verified remote delivery evidence;
 - default denial of secrets, external directories, destructive Git, deployments, and cloud mutation.
@@ -19,7 +19,7 @@ The workflow prevents an agent from converting a plausible narrative into unauth
 
 `opencode.json` defines the baseline. Sensitive environment, key, package-credential, and credential/secret JSON patterns are denied. External directories are denied. Shell commands are generally `ask`; limited read-only Git/GitHub observations are allowed while destructive and publishing operations are denied.
 
-All `workflow_*` actions are globally denied. Agent files reopen only required tools. The orchestrator receives state, gate, profile, validation, diagnosis-validation, and delivery-readiness tools. Developer/tester receive only the gate tool. Quick-fix receives state, gate, and classifier. Delivery receives state and readiness plus separately approved scripts. Reviewers and diagnostician receive no shell or custom workflow tools.
+All `workflow_*` actions are globally denied. Agent files reopen only required tools. The orchestrator receives state, gate, profile, validation, diagnosis-validation, and delivery-readiness tools. Developer/tester receive only the gate tool. Quick-fix receives state, gate, and classifier. Delivery receives state and readiness plus separately approved scripts. The standard and quick reviewers receive only their respective review-recording tools and no shell or edit access. The diagnostician receives no shell or custom workflow tools.
 
 OpenCode V2 permission rules are ordered and the last match wins. Review them in order. See [OpenCode permissions](https://opencode.ai/v2/docs/permissions).
 
@@ -53,6 +53,12 @@ Gate evidence requires run/project/runner/matrix identity plus fingerprints and 
 
 All candidate artifacts use `.ai/runtime/<run-id>/<artifact>`. State rejects a correct filename supplied from another run or from the shared runtime root. This prevents concurrent sessions from replacing one another's pending evidence.
 
+## Reviewer independence
+
+Review independence is enforced by capability and evidence, not only by prompt wording. `workflow_state` does not expose `RecordReview`, and orchestrator/implementation roles are denied direct review-artifact edits. The two reviewer roles have different exclusive typed tools that always stamp the expected role and workflow path.
+
+The recorder recomputes severity counts and the verdict from structured findings, acceptance-criteria coverage, and escalation reason. State then validates the schema and independently binds the artifact to the current run, SHA, worktree fingerprint, and canonical gate hash. A reviewer cannot declare `PASS` while reporting a `BLOCKER`, `HIGH`, or uncovered acceptance criterion, and another role cannot complete the review through the normal state capability.
+
 ## Quality command risks
 
 Configured commands are executable repository policy. Bootstrap cites their source and the user approves them. Typed gates prevent agent selection changes; they cannot make a malicious approved command safe.
@@ -80,7 +86,7 @@ Rules include:
 - no reviewers, labels, assignees, comments, merge, or auto-merge;
 - no release, deployment, secret, workflow-dispatch, or cloud mutation.
 
-Gate/review evidence is tied to the exact worktree diff. Later changes invalidate readiness. Publish recording uses `git ls-remote` to prove the configured upstream ref points to the persisted commit. Draft-PR recording uses `gh pr view` to prove the number, URL, base, head, head SHA, title, open state, and draft state. Agent-authored delivery JSON alone cannot advance state.
+Gate/review evidence is tied to the exact worktree diff. Later changes invalidate readiness. Branch recording proves the new branch was created from the run's named starting branch at the persisted SHA with a clean worktree. Commit recording validates the message returned by Git, rejects forbidden/non-Conventional attribution, compares the real changed paths, and proves the committed diff is the reviewed diff. Publish recording uses `git ls-remote` to prove the configured upstream ref points to the persisted commit. Draft-PR recording uses `gh pr view` to prove the number, URL, base, head, head SHA, title, open state, and draft state. Agent-authored delivery JSON alone cannot advance state.
 
 ## Installation trust
 

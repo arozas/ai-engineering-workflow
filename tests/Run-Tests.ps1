@@ -60,7 +60,7 @@ try {
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-Mode', 'Local') | Out-Null
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local installation remains invisible to Git.'
     $metadata = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\workflow-installation.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($metadata.workflowVersion -eq '1.9.0') -Message 'Installed metadata records version 1.9.0.'
+    Assert-True -Condition ($metadata.workflowVersion -eq '1.10.0') -Message 'Installed metadata records version 1.10.0.'
 
     $profileScript = Join-Path $repositoryRoot '.ai\scripts\profile-project.ps1'
     $profileOutput = Invoke-PowerShell -ScriptPath $profileScript -Arguments @('-OutputPath', '.ai/project-profile.json') -WorkingDirectory $repositoryRoot
@@ -321,6 +321,10 @@ Applies to `src/app`.
     $approvedPlan = 'Change src/app/app.js, add src/app/new.txt, and verify both files.'
     Set-Content -LiteralPath (Get-RunRuntimePath $runId 'plan.md') -Value $approvedPlan -Encoding utf8
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $runId, '-ArtifactPath', (Get-RunRuntimeRelativePath $runId 'plan.md'), '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    $managedBranch = 'test/workflow-evidence'
+    Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\create-branch.ps1') -Arguments @('-RunId', $runId, '-Name', $managedBranch) -WorkingDirectory $repositoryRoot | Out-Null
+    $branchState = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Validate', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
+    Assert-True -Condition ($branchState.status -eq 'PLAN_APPROVED' -and $branchState.artifacts.branch.verdict -eq 'PASS' -and (& git -C $repositoryRoot branch --show-current).Trim() -eq $managedBranch) -Message 'Approved branch creation persists evidence and keeps the plan ready for implementation.'
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-Null
     Set-Content -LiteralPath (Join-Path $sourceRoot 'app.js') -Value 'export const value = "after";' -Encoding utf8
     Set-Content -LiteralPath (Join-Path $sourceRoot 'new.txt') -Value 'new file' -Encoding utf8
@@ -346,21 +350,60 @@ Applies to `src/app`.
 
     $canonicalPlanPath = Join-Path $repositoryRoot ".ai\runs\$runId\plan.md"
     Set-Content -LiteralPath $canonicalPlanPath -Value 'unapproved replacement plan' -Encoding utf8
-    Set-Content -LiteralPath (Get-RunRuntimePath $runId 'review.md') -Value 'FAST REVIEW PASS' -Encoding utf8
-    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordReview', '-RunId', $runId, '-ArtifactPath', (Get-RunRuntimeRelativePath $runId 'review.md'), '-Verdict', 'PASS') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    $reviewPayloadPath = Get-RunRuntimePath $runId 'review-input.json'
+    $reviewPayload = [ordered]@{
+        summary = 'The bounded fixture change satisfies its acceptance criterion.'
+        findings = @()
+        acceptanceCriteriaCoverage = @([ordered]@{
+            criterion = 'Update the fixture and add the requested file.'
+            status = 'COVERED'
+            evidence = 'src/app/app.js and src/app/new.txt contain the requested bounded change.'
+        })
+        residualRisks = @()
+    }
+    $reviewPayload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reviewPayloadPath -Encoding utf8
+    Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\record-review.ps1') -Arguments @('-RunId', $runId, '-ReviewerRole', 'quick-reviewer', '-PayloadPath', (Get-RunRuntimeRelativePath $runId 'review-input.json')) -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
     Assert-True -Condition $true -Message 'Every state transition rejects a modified canonical artifact.'
     Set-Content -LiteralPath $canonicalPlanPath -Value $approvedPlan -Encoding utf8
 
-    Set-Content -LiteralPath (Get-RunRuntimePath $runId 'review.md') -Value 'FAST REVIEW PASS' -Encoding utf8
-    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordReview', '-RunId', $runId, '-ArtifactPath', (Get-RunRuntimeRelativePath $runId 'review.md'), '-Verdict', 'PASS') -WorkingDirectory $repositoryRoot | Out-Null
+    $forgedReview = Get-Content -LiteralPath (Get-RunRuntimePath $runId 'review.json') -Raw | ConvertFrom-Json
+    $forgedReview.gateEvidenceSha256 = ('0' * 64)
+    $forgedReview | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Get-RunRuntimePath $runId 'review.json') -Encoding utf8
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordReview', '-RunId', $runId, '-ArtifactPath', (Get-RunRuntimeRelativePath $runId 'review.json'), '-Verdict', 'PASS') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Assert-True -Condition $true -Message 'Forged review evidence cannot advance workflow state.'
+    $reviewPayload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reviewPayloadPath -Encoding utf8
+    Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\record-review.ps1') -Arguments @('-RunId', $runId, '-ReviewerRole', 'quick-reviewer', '-PayloadPath', (Get-RunRuntimeRelativePath $runId 'review-input.json')) -WorkingDirectory $repositoryRoot | Out-Null
     $ready = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Validate', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
-    Assert-True -Condition ($ready.status -eq 'READY_FOR_DELIVERY') -Message 'Approved plan, gates, and review reach READY_FOR_DELIVERY.'
+    Assert-True -Condition ($ready.status -eq 'READY_FOR_DELIVERY' -and $ready.artifacts.review.path -eq 'review.json') -Message 'Reviewer-scoped structured evidence advances the approved run to READY_FOR_DELIVERY.'
 
     & git -C $repositoryRoot add -- 'src/app/app.js' 'src/app/new.txt'
-    & git -C $repositoryRoot commit -m 'test: update fixture' | Out-Null
+    & git -C $repositoryRoot commit -m 'update fixture without conventional type' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Unable to create state-machine test commit.' }
     $commitSha = (& git -C $repositoryRoot rev-parse HEAD).Trim()
-    Set-Content -LiteralPath (Get-RunRuntimePath $runId 'commit.json') -Value ('{"sha":"' + $commitSha + '"}') -Encoding utf8
+    $commitEvidence = [ordered]@{
+        schemaVersion = 1
+        runId = $runId
+        sha = $commitSha
+        parentSha = [string]$ready.currentSha
+        branch = $managedBranch
+        files = @('src/app/app.js', 'src/app/new.txt')
+        message = 'update fixture without conventional type'
+        committedAtUtc = [DateTime]::UtcNow.ToString('o')
+    }
+    $commitEvidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Get-RunRuntimePath $runId 'commit.json') -Encoding utf8
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordCommit', '-RunId', $runId, '-ArtifactPath', (Get-RunRuntimeRelativePath $runId 'commit.json')) -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Assert-True -Condition $true -Message 'State rejects the actual Git commit when its message is not Conventional Commits, even when evidence matches it.'
+    & git -C $repositoryRoot commit --amend -m 'test: update fixture' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to replace the adversarial test fixture with a valid commit.' }
+    $commitSha = (& git -C $repositoryRoot rev-parse HEAD).Trim()
+    $commitEvidence.sha = $commitSha
+    $commitEvidence.message = 'fix: forged evidence message'
+    $commitEvidence.committedAtUtc = [DateTime]::UtcNow.ToString('o')
+    $commitEvidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Get-RunRuntimePath $runId 'commit.json') -Encoding utf8
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordCommit', '-RunId', $runId, '-ArtifactPath', (Get-RunRuntimeRelativePath $runId 'commit.json')) -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Assert-True -Condition $true -Message 'Commit evidence cannot substitute a forged message for the actual Git commit message.'
+    $commitEvidence.message = 'test: update fixture'
+    $commitEvidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Get-RunRuntimePath $runId 'commit.json') -Encoding utf8
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordCommit', '-RunId', $runId, '-ArtifactPath', (Get-RunRuntimeRelativePath $runId 'commit.json')) -WorkingDirectory $repositoryRoot | Out-Null
     $committed = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Show', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
     Assert-True -Condition ($committed.status -eq 'COMMITTED' -and $committed.currentSha -eq $commitSha) -Message 'The exact reviewed diff, including a new file, can be recorded as committed.'
@@ -377,8 +420,8 @@ Applies to `src/app`.
         schemaVersion = 1
         runId = $runId
         remote = 'origin'
-        branch = 'test/workflow'
-        ref = 'refs/heads/test/workflow'
+        branch = $managedBranch
+        ref = "refs/heads/$managedBranch"
         sha = '0000000000000000000000000000000000000000'
         result = 'PUBLISHED'
         publishedAtUtc = [DateTime]::UtcNow.ToString('o')
@@ -390,8 +433,8 @@ Applies to `src/app`.
         schemaVersion = 1
         runId = $runId
         remote = 'origin'
-        branch = 'test/workflow'
-        ref = 'refs/heads/test/workflow'
+        branch = $managedBranch
+        ref = "refs/heads/$managedBranch"
         sha = $commitSha
         result = 'PUBLISHED'
         publishedAtUtc = [DateTime]::UtcNow.ToString('o')
@@ -417,7 +460,7 @@ exit 0
             number = 42
             url = $prUrl
             baseRefName = 'main'
-            headRefName = 'test/workflow'
+            headRefName = $managedBranch
             headRefOid = $commitSha
             title = $prTitle
             isDraft = $true
@@ -429,7 +472,7 @@ exit 0
             number = 42
             url = $prUrl
             base = 'main'
-            head = 'test/workflow'
+            head = $managedBranch
             headSha = $commitSha
             title = $prTitle
             draft = $true
@@ -450,6 +493,34 @@ exit 0
     }
     $draftPr = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Show', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
     Assert-True -Condition ($draftPr.status -eq 'DRAFT_PR_CREATED') -Message 'Draft PR state advances only after GitHub metadata is independently verified.'
+
+    $guardedCommitRunId = 'guarded-commit-script'
+    Set-Content -LiteralPath (Get-RunRuntimePath $guardedCommitRunId 'requirement.md') -Value 'Verify the guarded commit script end to end.' -Encoding utf8
+    Set-Content -LiteralPath (Get-RunRuntimePath $guardedCommitRunId 'plan.md') -Value 'Update the fixture value and create one validated conventional commit.' -Encoding utf8
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $guardedCommitRunId, '-WorkflowPath', 'fast-path', '-TaskType', 'Test', '-ArtifactPath', (Get-RunRuntimeRelativePath $guardedCommitRunId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $guardedCommitRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $guardedCommitRunId 'plan.md'), '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $guardedCommitRunId) -WorkingDirectory $repositoryRoot | Out-Null
+    Set-Content -LiteralPath (Join-Path $sourceRoot 'app.js') -Value 'export const value = "guarded-commit";' -Encoding utf8
+    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $guardedCommitRunId) -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordGates', '-RunId', $guardedCommitRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $guardedCommitRunId 'gates.json'), '-Verdict', 'PASS') -WorkingDirectory $repositoryRoot | Out-Null
+    $guardedReviewPayload = [ordered]@{
+        summary = 'The guarded commit fixture satisfies the approved one-file change.'
+        findings = @()
+        acceptanceCriteriaCoverage = @([ordered]@{
+            criterion = 'Update the fixture value.'
+            status = 'COVERED'
+            evidence = 'src/app/app.js contains the approved guarded-commit value.'
+        })
+        residualRisks = @()
+    }
+    $guardedReviewPayload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Get-RunRuntimePath $guardedCommitRunId 'review-input.json') -Encoding utf8
+    Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\record-review.ps1') -Arguments @('-RunId', $guardedCommitRunId, '-ReviewerRole', 'quick-reviewer', '-PayloadPath', (Get-RunRuntimeRelativePath $guardedCommitRunId 'review-input.json')) -WorkingDirectory $repositoryRoot | Out-Null
+    & git -C $repositoryRoot add -- 'src/app/app.js'
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to stage the guarded commit fixture.' }
+    Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\commit-approved.ps1') -Arguments @('-RunId', $guardedCommitRunId, '-Subject', 'test: verify guarded commit script') -WorkingDirectory $repositoryRoot | Out-Null
+    $guardedCommitState = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Validate', '-RunId', $guardedCommitRunId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
+    $guardedCommitEvidence = Get-Content -LiteralPath (Join-Path $repositoryRoot ".ai\runs\$guardedCommitRunId\commit.json") -Raw | ConvertFrom-Json
+    Assert-True -Condition ($guardedCommitState.status -eq 'COMMITTED' -and $guardedCommitEvidence.message -eq 'test: verify guarded commit script' -and $guardedCommitEvidence.files -contains 'src/app/app.js') -Message 'The guarded commit script creates, validates, records, and canonicalizes the actual commit evidence.'
 
     Set-Content -LiteralPath (Join-Path $repositoryRoot 'package.json') -Value '{"name":"risk"}' -Encoding utf8
     Invoke-PowerShell -ScriptPath $classifier -Arguments @('-TaskType', 'SmallTask', '-Phase', 'Actual', '-BaseRef', 'HEAD', '-AcceptanceClear', '-VerificationAvailable') -ExpectedExitCode 3 -WorkingDirectory $repositoryRoot | Out-Null

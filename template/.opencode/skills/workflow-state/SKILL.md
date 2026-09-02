@@ -19,11 +19,11 @@ Use only the typed `workflow_state` tool:
 1. Choose a unique run ID, write the normalized request to `.ai/runtime/<run-id>/requirement.md`, then `Start` with `standard` or `fast-path`.
 2. Write the complete proposed plan to `.ai/runtime/<run-id>/plan.md`.
 3. Only after explicit user approval, call `ApprovePlan` with that exact file and every affected module ID. The script copies and hashes the plan and freezes the exact project and quality-command matrix.
-4. Call `BeginImplementation` before production or test edits.
+4. If an approved feature branch is needed, have `delivery` invoke `create-branch.ps1` with the run ID and exact approved name. The script persists `branch.json` through `RecordBranch` while state remains `PLAN_APPROVED`. Then call `BeginImplementation` before production or test edits.
 5. Run `workflow_gate` with the run ID. It writes factual gate evidence to `.ai/runtime/<run-id>/gates.json`; then call `RecordGates` with `PASS` or `FAIL`.
-6. Pass the exact persisted requirement, plan, diff packet, and gates to the read-only reviewer. Write its returned result to `.ai/runtime/<run-id>/review.md`, then call `RecordReview`.
+6. Pass the exact persisted requirement, plan, diff packet, and gates to the read-only reviewer. The reviewer must call its exclusive typed review tool, which writes `.ai/runtime/<run-id>/review.json` and atomically records the derived verdict. Orchestrators and implementation agents must not write or record review evidence.
 7. Use `BeginCorrection` before an approved correction. The script enforces the workflow-specific limit.
-8. After an approved commit, write its evidence to `.ai/runtime/<run-id>/commit.json` and call `RecordCommit`; the script proves that the commit is the exact gate-reviewed diff.
+8. After exact paths and a Conventional Commit message are approved, have `delivery` invoke `commit-approved.ps1` with the run ID. The script writes `commit.json` and records it; state independently reads and validates the actual Git message, changed files, parent, branch, and gate-reviewed diff.
 9. Record an approved push and draft PR with `RecordPublish` and `RecordPullRequest` respectively.
 10. Use `Escalate` when scope, evidence, or correction limits invalidate the current route.
 

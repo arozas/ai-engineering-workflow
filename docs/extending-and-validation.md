@@ -89,11 +89,11 @@ It verifies:
 - required files and concise README policy;
 - preset ID and reference integrity;
 - agent/command frontmatter and skill names;
-- sensitive-path and reviewer permission invariants;
+- sensitive-path, reviewer-exclusive tool, and direct-evidence-write permission invariants;
 - absence of automatic managed-script shell allowances;
 - presence and argument-vector implementation of typed tools;
 - quality runner/state matrix protections;
-- run-specific staging and remote delivery verification contracts;
+- run-specific staging plus review, branch, commit, publish, and PR verification contracts;
 - installation metadata and Local-mode safety logic;
 - PR-template synchronization;
 - JSON syntax and PowerShell parsing.
@@ -117,7 +117,9 @@ The suite creates a temporary Git consumer, installs Local mode, and exercises:
 - production diagnosis and confirmed-diagnosis handoff;
 - fast-path actual scope;
 - control-plane and artifact tamper detection;
-- reviewed diff to commit evidence;
+- reviewer-scoped structured evidence and forged-review rejection;
+- persisted branch-creation evidence;
+- independently validated actual commit message, changed paths, and reviewed diff;
 - forged publish rejection plus real remote-ref verification;
 - GitHub draft-PR metadata verification through a deterministic CLI fixture;
 - reviewer isolation and typed-tool permissions;
@@ -134,7 +136,9 @@ opencode --version
 pwsh -NoProfile -File .\scripts\smoke-opencode.ps1
 ```
 
-The smoke test creates a temporary consumer repository, installs Local mode, starts `opencode serve` on loopback without a model call, and queries the documented health, agent, command, and tool-ID endpoints. It fails when an agent or command cannot be discovered, a typed TypeScript tool cannot load, or the server cannot parse the installed configuration. CI installs `opencode-ai@latest` so upstream compatibility drift becomes visible before release.
+The smoke test creates a temporary consumer repository, installs Local mode, starts `opencode serve` on loopback without a model call, and queries the documented health, agent, command, and tool-ID endpoints. It fails when an agent or command cannot be discovered, either reviewer-specific tool is missing, another typed TypeScript tool cannot load, or the server cannot parse the installed configuration.
+
+CI has two compatibility lanes. The required `validate` job installs the explicitly supported `opencode-ai` version (`1.18.26`) and runs static validation, isolated tests, and discovery smoke testing. The separate `opencode-latest-canary` job installs `latest`, runs discovery smoke testing, and is non-blocking. Update the supported pin deliberately after the canary succeeds and the release has been reviewed; a breaking upstream release should warn maintainers without making every known-good change unmergeable.
 
 Static validation remains useful for precise policy invariants, and the isolated PowerShell suite remains useful for deterministic state behavior. Neither substitutes for loading the distribution through the real OpenCode runtime.
 

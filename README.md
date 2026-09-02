@@ -15,9 +15,10 @@ It converts tickets, specifications, written requirements, and unknown productio
 - Persisted, hash-verified run state under local `.ai/runs/` records, with isolated staging under `.ai/runtime/<run-id>/`.
 - An orchestrator plus specialized developer, tester, reviewer, diagnostician, quick-fix, and delivery agents.
 - Deterministic quality gates bound to the exact modules and commands approved in the plan.
+- Reviewer-scoped structured evidence whose verdict is derived from findings and acceptance-criteria coverage.
 - Read-only Azure DevOps work-item integration.
 - Local-first installation that avoids workflow files in consumer commits by default.
-- Guarded branch, Conventional Commit, push, and draft-PR operations with separate human approvals and remote verification.
+- Guarded branch, Conventional Commit, push, and draft-PR operations with separate human approvals and independently verified evidence.
 
 The workflow does not replace repository conventions, CI/CD, code ownership, or human judgment. Merge, history rewriting, release, deployment, secret handling, and cloud mutations remain manual and denied.
 
@@ -155,7 +156,7 @@ pwsh -NoProfile -File .\tests\Run-Tests.ps1
 pwsh -NoProfile -File .\scripts\smoke-opencode.ps1
 ```
 
-The first two commands require Git and PowerShell. The smoke test additionally requires the current `opencode` CLI; it starts a local model-free server and verifies that OpenCode discovers every installed agent, command, and typed workflow tool. CI installs the current OpenCode release and runs all three layers. The isolated suite also proves run-level staging isolation and independently verifies remote publish and draft-PR evidence.
+The first two commands require Git and PowerShell. The smoke test additionally requires the `opencode` CLI; it starts a local model-free server and verifies that OpenCode discovers every installed agent, command, and typed workflow tool. The required CI job pins the supported `opencode-ai` version (`1.18.26`), while a separate non-blocking `latest` canary exposes upstream compatibility drift. The isolated suite also proves run-level staging, reviewer, branch, commit, remote publish, and draft-PR evidence binding.
 
 ## OpenCode references
 
