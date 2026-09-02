@@ -109,6 +109,51 @@ function Start-OpenCodeServer {
         -PassThru
 }
 
+function Stop-OpenCodeServer {
+    param([Parameter(Mandatory = $true)][System.Diagnostics.Process]$ServerProcess)
+
+    if ($ServerProcess.HasExited) { return }
+
+    if ($isWindowsPlatform) {
+        $taskkillCommand = Get-Command taskkill.exe -ErrorAction SilentlyContinue
+        if ($null -ne $taskkillCommand) {
+            & $taskkillCommand.Source /PID $ServerProcess.Id /T /F | Out-Null
+            $ServerProcess.WaitForExit(5000) | Out-Null
+            return
+        }
+    }
+
+    Stop-Process -Id $ServerProcess.Id -Force -ErrorAction SilentlyContinue
+    $ServerProcess.WaitForExit(5000) | Out-Null
+}
+
+function Remove-SmokeTestRoot {
+    param([Parameter(Mandatory = $true)][string]$RootPath)
+
+    if (-not (Test-Path -LiteralPath $RootPath)) { return }
+
+    $resolved = [IO.Path]::GetFullPath($RootPath)
+    $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    if (-not $resolved.StartsWith($temporaryRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        -not ([IO.Path]::GetFileName($resolved)).StartsWith('ai-engineering-workflow-opencode-smoke-', [StringComparison]::Ordinal)) {
+        throw "Unsafe smoke-test cleanup target: $resolved"
+    }
+
+    foreach ($attempt in 1..5) {
+        try {
+            Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction Stop
+            return
+        }
+        catch {
+            if ($attempt -eq 5) {
+                Write-Warning "Unable to remove smoke-test temporary directory '$resolved': $($_.Exception.Message)"
+                return
+            }
+            Start-Sleep -Milliseconds (250 * $attempt)
+        }
+    }
+}
+
 try {
     $opencodeCommandSource = Resolve-OpenCodeCommandSource
 
@@ -178,19 +223,10 @@ try {
 }
 finally {
     if ($null -ne $process -and -not $process.HasExited) {
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        $process.WaitForExit(5000) | Out-Null
+        Stop-OpenCodeServer -ServerProcess $process
     }
     foreach ($name in $environmentNames) {
         [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process')
     }
-    if (Test-Path -LiteralPath $testRoot) {
-        $resolved = [IO.Path]::GetFullPath($testRoot)
-        $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-        if (-not $resolved.StartsWith($temporaryRoot, [StringComparison]::OrdinalIgnoreCase) -or
-            -not ([IO.Path]::GetFileName($resolved)).StartsWith('ai-engineering-workflow-opencode-smoke-', [StringComparison]::Ordinal)) {
-            throw "Unsafe smoke-test cleanup target: $resolved"
-        }
-        Remove-Item -LiteralPath $resolved -Recurse -Force
-    }
+    Remove-SmokeTestRoot -RootPath $testRoot
 }
