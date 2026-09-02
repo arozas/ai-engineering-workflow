@@ -7,8 +7,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $distributionRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$opencodeCommand = Get-Command opencode -ErrorAction SilentlyContinue
-if ($null -eq $opencodeCommand) { throw 'OpenCode CLI was not found. Install opencode-ai before running the smoke test.' }
+$isWindowsPlatform = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
 
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('ai-engineering-workflow-opencode-smoke-' + [Guid]::NewGuid().ToString('N'))
 $consumerRoot = Join-Path $testRoot 'consumer'
@@ -27,6 +26,29 @@ $environmentNames = @(
     'OPENCODE_DISABLE_MODELS_FETCH'
 )
 $previousEnvironment = @{}
+
+function Resolve-OpenCodeCommandSource {
+    $commands = @(Get-Command opencode -All -ErrorAction SilentlyContinue)
+    if ($commands.Count -eq 0) { throw 'OpenCode CLI was not found. Install opencode-ai before running the smoke test.' }
+
+    foreach ($command in $commands) {
+        $source = [string]$command.Source
+        if ([string]::IsNullOrWhiteSpace($source)) { continue }
+
+        $extension = [IO.Path]::GetExtension($source)
+        if ($isWindowsPlatform -and [string]::IsNullOrEmpty($extension)) {
+            foreach ($candidateExtension in @('.cmd', '.ps1', '.exe', '.bat')) {
+                $candidate = "$source$candidateExtension"
+                if (Test-Path -LiteralPath $candidate) { return $candidate }
+            }
+            continue
+        }
+
+        return $source
+    }
+
+    throw 'OpenCode CLI was found, but no executable Windows shim could be resolved.'
+}
 
 function Get-FreeTcpPort {
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
@@ -47,7 +69,36 @@ function Get-DefinitionNames([object[]]$Definitions) {
     )
 }
 
+function Start-OpenCodeServer {
+    param(
+        [Parameter(Mandatory = $true)][string]$CommandSource,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][int]$Port,
+        [Parameter(Mandatory = $true)][string]$StandardOutputPath,
+        [Parameter(Mandatory = $true)][string]$StandardErrorPath
+    )
+
+    $pwshCommand = Get-Command pwsh -ErrorAction Stop
+    return Start-Process -FilePath $pwshCommand.Source `
+        -ArgumentList @(
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-Command',
+            '& $args[0] serve --hostname 127.0.0.1 --port $args[1]',
+            $CommandSource,
+            [string]$Port
+        ) `
+        -WorkingDirectory $WorkingDirectory `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $StandardOutputPath `
+        -RedirectStandardError $StandardErrorPath `
+        -PassThru
+}
+
 try {
+    $opencodeCommandSource = Resolve-OpenCodeCommandSource
+
     New-Item -ItemType Directory -Path $consumerRoot -Force | Out-Null
     & git -C $consumerRoot init -b main | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Unable to initialize the OpenCode smoke-test repository.' }
@@ -71,13 +122,12 @@ try {
     }
 
     $port = Get-FreeTcpPort
-    $process = Start-Process -FilePath $opencodeCommand.Source `
-        -ArgumentList @('serve', '--hostname', '127.0.0.1', '--port', [string]$port) `
+    $process = Start-OpenCodeServer `
+        -CommandSource $opencodeCommandSource `
         -WorkingDirectory $consumerRoot `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $stdoutPath `
-        -RedirectStandardError $stderrPath `
-        -PassThru
+        -Port $port `
+        -StandardOutputPath $stdoutPath `
+        -StandardErrorPath $stderrPath
 
     $baseUrl = "http://127.0.0.1:$port"
     $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
