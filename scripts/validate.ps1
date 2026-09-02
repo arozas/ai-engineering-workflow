@@ -271,15 +271,15 @@ if ($installOutputContent -match '(?m)^.*opencode2.*$') {
     $errors += 'Onboarding scripts must invoke the official opencode executable name.'
 }
 $openCodeSmokeContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\smoke-opencode.ps1') -Raw
-foreach ($smokeToken in @('/global/health', '/agent', '/command', '/experimental/tool/ids', 'workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate')) {
+foreach ($smokeToken in @('opencode2', '/global/health', '/agent', '/command', '/experimental/tool/ids', 'workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate')) {
     if ($openCodeSmokeContent -notmatch [regex]::Escape($smokeToken)) {
         $errors += "OpenCode smoke test is missing discovery check: $smokeToken."
     }
 }
 $ciContent = Get-Content -LiteralPath (Join-Path $workflowRoot '.github\workflows\validate.yml') -Raw
-foreach ($ciToken in @('SUPPORTED_OPENCODE_VERSION: 1.18.26', 'opencode-ai@$env:SUPPORTED_OPENCODE_VERSION', 'opencode-latest-canary:', 'continue-on-error: true', 'opencode-ai@latest')) {
+foreach ($ciToken in @("SUPPORTED_OPENCODE_PACKAGE: '@opencode-ai/cli@beta'", '$env:SUPPORTED_OPENCODE_PACKAGE', 'opencode2 --version', 'opencode-latest-canary:', 'continue-on-error: true', '@opencode-ai/cli@beta')) {
     if ($ciContent -notmatch [regex]::Escape($ciToken)) {
-        $errors += "CI is missing supported-version or latest-canary contract: $ciToken."
+        $errors += "CI is missing supported OpenCode V2 or canary contract: $ciToken."
     }
 }
 

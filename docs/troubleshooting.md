@@ -1,14 +1,14 @@
 # Troubleshooting
 
-## `opencode` is not recognized
+## `opencode2` is not recognized
 
-The OpenCode CLI is missing from the current terminal's `PATH`, or the terminal predates installation. Follow the current [official installation documentation](https://opencode.ai/docs/) for your platform, close and reopen PowerShell, then verify:
+The OpenCode V2 CLI is missing from the current terminal's `PATH`, or the terminal predates installation. Follow the current [official V2 installation documentation](https://opencode.ai/v2/docs) for your platform, close and reopen PowerShell, then verify:
 
 ```powershell
-opencode --version
+opencode2 --version
 ```
 
-The command is `opencode`, not `opencode2`. Installing this repository does not install the OpenCode CLI.
+This workflow uses OpenCode V2 configuration and permissions, so the command is `opencode2`. Installing this repository does not install the OpenCode CLI.
 
 ## Installation reports conflicts
 
@@ -163,7 +163,7 @@ The workflow uses the current Node 24-based checkout action. If a runtime deprec
 
 ## OpenCode smoke discovery fails
 
-Run `opencode --version`, then execute `scripts/smoke-opencode.ps1` locally. The test does not call a model; it verifies the local server health and discovery endpoints, including both reviewer-specific tools. Failure usually means the installed OpenCode version cannot parse `opencode.json`, one Markdown definition has invalid frontmatter, or `.opencode/tools/workflow.ts` cannot load. Compare the local version with the supported CI pin, inspect the reported missing names or temporary server error, fix the distribution source, and rerun all validation layers. A failure limited to the non-blocking `latest` canary indicates upstream drift and does not invalidate the pinned supported lane.
+Run `opencode2 --version`, then execute `scripts/smoke-opencode.ps1` locally. The test does not call a model; it verifies the local server health and discovery endpoints, including both reviewer-specific tools. The script prefers `opencode2` because this template uses OpenCode V2 permissions. If the server reports that V2 permissions are unsupported, the V1 `opencode` executable was selected or `opencode2` is missing from PATH. Other failures usually mean the installed OpenCode version cannot parse `opencode.json`, one Markdown definition has invalid frontmatter, or `.opencode/tools/workflow.ts` cannot load. Compare the local version with the supported CI V2 package, inspect the reported missing names or temporary server error, fix the distribution source, and rerun all validation layers. A failure limited to the non-blocking canary indicates upstream beta drift and does not invalidate a known-good supported lane.
 
 ## Collecting useful support evidence
 

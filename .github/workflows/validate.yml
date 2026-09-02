@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  SUPPORTED_OPENCODE_VERSION: 1.18.26
+  SUPPORTED_OPENCODE_PACKAGE: '@opencode-ai/cli@beta'
 
 jobs:
   validate:
@@ -28,9 +28,13 @@ jobs:
         shell: pwsh
         run: ./tests/Run-Tests.ps1
 
-      - name: Install supported OpenCode CLI
+      - name: Install supported OpenCode V2 CLI
         shell: pwsh
-        run: npm install --global "opencode-ai@$env:SUPPORTED_OPENCODE_VERSION"
+        run: npm install --global "$env:SUPPORTED_OPENCODE_PACKAGE"
+
+      - name: Verify supported OpenCode V2 CLI
+        shell: pwsh
+        run: opencode2 --version
 
       - name: Smoke-test supported OpenCode discovery
         shell: pwsh
@@ -44,9 +48,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Install latest OpenCode CLI canary
+      - name: Install latest OpenCode V2 CLI canary
         shell: pwsh
-        run: npm install --global opencode-ai@latest
+        run: npm install --global @opencode-ai/cli@beta
+
+      - name: Verify latest OpenCode V2 CLI canary
+        shell: pwsh
+        run: opencode2 --version
 
       - name: Smoke-test latest OpenCode discovery
         shell: pwsh

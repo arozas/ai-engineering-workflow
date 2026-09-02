@@ -28,8 +28,11 @@ $environmentNames = @(
 $previousEnvironment = @{}
 
 function Resolve-OpenCodeCommandSource {
-    $commands = @(Get-Command opencode -All -ErrorAction SilentlyContinue)
-    if ($commands.Count -eq 0) { throw 'OpenCode CLI was not found. Install opencode-ai before running the smoke test.' }
+    $commands = @()
+    foreach ($commandName in @('opencode2', 'opencode')) {
+        $commands += @(Get-Command $commandName -All -ErrorAction SilentlyContinue)
+    }
+    if ($commands.Count -eq 0) { throw 'OpenCode CLI was not found. Install @opencode-ai/cli@beta before running the smoke test.' }
 
     foreach ($command in $commands) {
         $source = [string]$command.Source

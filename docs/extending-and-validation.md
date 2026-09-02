@@ -129,16 +129,16 @@ Expected child-process failures are assertions, not suite failures. The test scr
 
 ## OpenCode discovery smoke test
 
-Install the current OpenCode CLI, then run:
+Install the current OpenCode CLI package, then run:
 
 ```powershell
-opencode --version
+opencode2 --version
 pwsh -NoProfile -File .\scripts\smoke-opencode.ps1
 ```
 
-The smoke test creates a temporary consumer repository, installs Local mode, starts `opencode serve` on loopback without a model call, and queries the documented health, agent, command, and tool-ID endpoints. It fails when an agent or command cannot be discovered, either reviewer-specific tool is missing, another typed TypeScript tool cannot load, or the server cannot parse the installed configuration.
+The smoke test creates a temporary consumer repository, installs Local mode, starts the V2 executable on loopback without a model call, and queries the documented health, agent, command, and tool-ID endpoints. It prefers `opencode2` because the template uses OpenCode V2 permissions; falling back to the V1 `opencode` executable will reject `template/opencode.json`. It fails when an agent or command cannot be discovered, either reviewer-specific tool is missing, another typed TypeScript tool cannot load, or the server cannot parse the installed configuration.
 
-CI has two compatibility lanes. The required `validate` job installs the explicitly supported `opencode-ai` version (`1.18.26`) and runs static validation, isolated tests, and discovery smoke testing. The separate `opencode-latest-canary` job installs `latest`, runs discovery smoke testing, and is non-blocking. Update the supported pin deliberately after the canary succeeds and the release has been reviewed; a breaking upstream release should warn maintainers without making every known-good change unmergeable.
+CI has two compatibility lanes. The required `validate` job installs the supported OpenCode V2 beta package (`@opencode-ai/cli@beta`) and runs static validation, isolated tests, and discovery smoke testing. The separate `opencode-latest-canary` job also runs discovery smoke testing against the current V2 beta package and is non-blocking. Because OpenCode V2 is still beta, review upstream changes deliberately before treating a canary failure as a workflow defect; a breaking upstream release should warn maintainers without making every known-good change unmergeable.
 
 Static validation remains useful for precise policy invariants, and the isolated PowerShell suite remains useful for deterministic state behavior. Neither substitutes for loading the distribution through the real OpenCode runtime.
 

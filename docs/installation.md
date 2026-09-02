@@ -123,9 +123,9 @@ Presets are starting points, not evidence about an existing repository. Existing
 
 ## First run in a consumer repository
 
-1. Install OpenCode and confirm `opencode --version` works in a new terminal.
+1. Install OpenCode V2 and confirm `opencode2 --version` works in a new terminal.
 2. Change to the consumer repository root.
-3. Start `opencode`.
+3. Start `opencode2`.
 4. Run `/ai-bootstrap`.
 5. Review the detected modules, confidence, evidence, proposed JSON, rules, and generated skills.
 6. Correct or explicitly approve the complete proposal.
