@@ -33,7 +33,7 @@ function Resolve-OpenCodeCommandSource {
     foreach ($commandName in @('opencode2', 'opencode')) {
         $commands += @(Get-Command $commandName -All -ErrorAction SilentlyContinue)
     }
-    if ($commands.Count -eq 0) { throw 'OpenCode CLI was not found. Install @opencode-ai/cli@beta before running the smoke test.' }
+    if (@($commands).Count -eq 0) { throw 'OpenCode CLI was not found. Install @opencode-ai/cli@beta before running the smoke test.' }
 
     foreach ($command in $commands) {
         $source = [string]$command.Source
@@ -85,8 +85,8 @@ function Get-DefinitionNames {
         }
 
         $properties = @($definition.PSObject.Properties)
-        if (($properties | Where-Object { $_.Name -eq 'name' }).Count -gt 0) { $names.Add([string]$definition.name) }
-        if (($properties | Where-Object { $_.Name -eq 'id' }).Count -gt 0) { $names.Add([string]$definition.id) }
+        if (@($properties | Where-Object { $_.Name -eq 'name' }).Count -gt 0) { $names.Add([string]$definition.name) }
+        if (@($properties | Where-Object { $_.Name -eq 'id' }).Count -gt 0) { $names.Add([string]$definition.id) }
 
         foreach ($property in $properties) {
             if ($property.Name -notin @('name', 'id', 'description')) { $names.Add([string]$property.Name) }
@@ -130,7 +130,7 @@ function Get-OpenCodeServerFailureDetails {
     }
     $stdout = Hide-OpenCodeServerPassword -Value ([string](Get-TextFileContent -Path $stdoutPath)).Trim()
     $stderr = Hide-OpenCodeServerPassword -Value ([string](Get-TextFileContent -Path $stderrPath)).Trim()
-    $healthDetails = if ($HealthErrors.Count -gt 0) { " Health checks: $($HealthErrors -join '; ')" } else { '' }
+    $healthDetails = if (@($HealthErrors).Count -gt 0) { " Health checks: $($HealthErrors -join '; ')" } else { '' }
     return "Process: $exitStatus. Stdout: $stdout Stderr: $stderr$healthDetails"
 }
 
@@ -183,10 +183,11 @@ function Invoke-OpenCodeEndpoint {
 }
 
 function Format-DiscoveredNames {
-    param([string[]]$Names)
+    param([AllowNull()][object]$Names)
 
-    if ($Names.Count -eq 0) { return '<none>' }
-    return ($Names | Select-Object -First 30) -join ', '
+    $nameList = @(@($Names) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($nameList.Count -eq 0) { return '<none>' }
+    return ($nameList | Select-Object -First 30) -join ', '
 }
 
 function Start-OpenCodeServer {
@@ -321,7 +322,7 @@ try {
             }
             catch {
                 $healthErrors += Hide-OpenCodeServerPassword -Value "${healthPath}: $($_.Exception.Message)"
-                if ($healthErrors.Count -gt 8) { $healthErrors = @($healthErrors | Select-Object -Last 8) }
+                if (@($healthErrors).Count -gt 8) { $healthErrors = @($healthErrors | Select-Object -Last 8) }
             }
         }
         if ($healthy) { break }
@@ -344,9 +345,9 @@ try {
     $missingAgents = @($expectedAgents | Where-Object { $agentNames -notcontains $_ })
     $missingCommands = @($expectedCommands | Where-Object { $commandNames -notcontains $_ })
     $missingTools = @($expectedTools | Where-Object { $toolNames -notcontains $_ })
-    if ($missingAgents.Count -gt 0) { throw "OpenCode did not discover workflow agents: $($missingAgents -join ', '). Discovered: $(Format-DiscoveredNames -Names $agentNames)." }
-    if ($missingCommands.Count -gt 0) { throw "OpenCode did not discover workflow commands: $($missingCommands -join ', '). Discovered: $(Format-DiscoveredNames -Names $commandNames)." }
-    if ($missingTools.Count -gt 0) { throw "OpenCode did not load typed workflow tools: $($missingTools -join ', '). Discovered: $(Format-DiscoveredNames -Names $toolNames)." }
+    if (@($missingAgents).Count -gt 0) { throw "OpenCode did not discover workflow agents: $($missingAgents -join ', '). Discovered: $(Format-DiscoveredNames -Names $agentNames)." }
+    if (@($missingCommands).Count -gt 0) { throw "OpenCode did not discover workflow commands: $($missingCommands -join ', '). Discovered: $(Format-DiscoveredNames -Names $commandNames)." }
+    if (@($missingTools).Count -gt 0) { throw "OpenCode did not load typed workflow tools: $($missingTools -join ', '). Discovered: $(Format-DiscoveredNames -Names $toolNames)." }
 
     Write-Host "OpenCode smoke test passed: $($expectedAgents.Count) agents, $($expectedCommands.Count) commands, and $($expectedTools.Count) typed tools discovered."
 }
