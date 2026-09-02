@@ -63,14 +63,44 @@ function Get-FreeTcpPort {
     finally { $listener.Stop() }
 }
 
-function Get-DefinitionNames([object[]]$Definitions) {
-    return @(
-        foreach ($definition in @($Definitions)) {
-            if ($definition -is [string]) { [string]$definition; continue }
-            if ($definition.PSObject.Properties.Name -contains 'name') { [string]$definition.name; continue }
-            if ($definition.PSObject.Properties.Name -contains 'id') { [string]$definition.id }
+function Get-DefinitionNames {
+    param([AllowNull()][object]$Definitions)
+
+    $names = [System.Collections.Generic.List[string]]::new()
+    if ($null -eq $Definitions) { return @() }
+
+    foreach ($definition in @($Definitions)) {
+        if ($null -eq $definition) { continue }
+        if ($definition -is [string]) {
+            $names.Add([string]$definition)
+            continue
         }
-    )
+
+        if ($definition -is [System.Collections.IDictionary]) {
+            foreach ($key in $definition.Keys) {
+                $names.Add([string]$key)
+                foreach ($nestedName in @(Get-DefinitionNames -Definitions $definition[$key])) { $names.Add($nestedName) }
+            }
+            continue
+        }
+
+        $properties = @($definition.PSObject.Properties)
+        if (($properties | Where-Object { $_.Name -eq 'name' }).Count -gt 0) { $names.Add([string]$definition.name) }
+        if (($properties | Where-Object { $_.Name -eq 'id' }).Count -gt 0) { $names.Add([string]$definition.id) }
+
+        foreach ($property in $properties) {
+            if ($property.Name -notin @('name', 'id', 'description')) { $names.Add([string]$property.Name) }
+        }
+
+        foreach ($collectionProperty in @('data', 'items', 'list')) {
+            $property = $properties | Where-Object { $_.Name -eq $collectionProperty } | Select-Object -First 1
+            if ($null -ne $property) {
+                foreach ($nestedName in @(Get-DefinitionNames -Definitions $property.Value)) { $names.Add($nestedName) }
+            }
+        }
+    }
+
+    return @($names | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
 }
 
 function Get-TextFileContent {
@@ -130,13 +160,19 @@ function Invoke-OpenCodeEndpoint {
     param(
         [Parameter(Mandatory = $true)][string]$BaseUrl,
         [Parameter(Mandatory = $true)][string[]]$Paths,
-        [Parameter(Mandatory = $true)][string]$Description
+        [Parameter(Mandatory = $true)][string]$Description,
+        [string]$Directory
     )
 
     $errors = @()
     foreach ($path in $Paths) {
         try {
-            return Invoke-RestMethod -Uri "$BaseUrl$path" -Headers (Get-OpenCodeRequestHeaders) -TimeoutSec 10
+            $uri = "$BaseUrl$path"
+            if (-not [string]::IsNullOrWhiteSpace($Directory)) {
+                $separator = if ($path.Contains('?')) { '&' } else { '?' }
+                $uri = "$uri${separator}directory=$([uri]::EscapeDataString($Directory))"
+            }
+            return Invoke-RestMethod -Uri $uri -Headers (Get-OpenCodeRequestHeaders) -TimeoutSec 10
         }
         catch {
             $errors += Hide-OpenCodeServerPassword -Value "${path}: $($_.Exception.Message)"
@@ -144,6 +180,13 @@ function Invoke-OpenCodeEndpoint {
     }
 
     throw "Unable to load OpenCode $Description. Tried: $($errors -join '; ')"
+}
+
+function Format-DiscoveredNames {
+    param([string[]]$Names)
+
+    if ($Names.Count -eq 0) { return '<none>' }
+    return ($Names | Select-Object -First 30) -join ', '
 }
 
 function Start-OpenCodeServer {
@@ -288,21 +331,22 @@ try {
         throw "OpenCode server did not become healthy. $(Get-OpenCodeServerFailureDetails -ServerProcess $process -HealthErrors $healthErrors)"
     }
 
-    $agents = @(Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/agent', '/api/agent') -Description 'agents')
-    $commands = @(Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/command', '/api/command') -Description 'commands')
-    $toolIds = @(Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/experimental/tool/ids', '/api/experimental/tool/ids') -Description 'typed tool IDs')
+    $agents = Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/api/agent', '/agent') -Description 'agents' -Directory $consumerRoot
+    $commands = Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/api/command', '/command') -Description 'commands' -Directory $consumerRoot
+    $toolIds = @(Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/api/experimental/tool/ids', '/experimental/tool/ids') -Description 'typed tool IDs' -Directory $consumerRoot)
     $agentNames = Get-DefinitionNames -Definitions $agents
     $commandNames = Get-DefinitionNames -Definitions $commands
+    $toolNames = Get-DefinitionNames -Definitions $toolIds
 
     $expectedAgents = @('orchestrator', 'developer', 'reviewer', 'tester', 'delivery', 'diagnostician', 'quick-fix', 'quick-reviewer')
     $expectedCommands = @('ai-bootstrap', 'ai-refresh', 'branch', 'commit', 'delivery-check', 'diagnose', 'explain', 'implement', 'pr', 'pr-create', 'publish', 'quick-fix', 'review', 'run-status', 'small-task', 'test', 'ticket')
     $expectedTools = @('workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_fast_path', 'workflow_validate_project', 'workflow_profile_project', 'workflow_validate_diagnosis', 'workflow_delivery_check')
     $missingAgents = @($expectedAgents | Where-Object { $agentNames -notcontains $_ })
     $missingCommands = @($expectedCommands | Where-Object { $commandNames -notcontains $_ })
-    $missingTools = @($expectedTools | Where-Object { $toolIds -notcontains $_ })
-    if ($missingAgents.Count -gt 0) { throw "OpenCode did not discover workflow agents: $($missingAgents -join ', ')." }
-    if ($missingCommands.Count -gt 0) { throw "OpenCode did not discover workflow commands: $($missingCommands -join ', ')." }
-    if ($missingTools.Count -gt 0) { throw "OpenCode did not load typed workflow tools: $($missingTools -join ', ')." }
+    $missingTools = @($expectedTools | Where-Object { $toolNames -notcontains $_ })
+    if ($missingAgents.Count -gt 0) { throw "OpenCode did not discover workflow agents: $($missingAgents -join ', '). Discovered: $(Format-DiscoveredNames -Names $agentNames)." }
+    if ($missingCommands.Count -gt 0) { throw "OpenCode did not discover workflow commands: $($missingCommands -join ', '). Discovered: $(Format-DiscoveredNames -Names $commandNames)." }
+    if ($missingTools.Count -gt 0) { throw "OpenCode did not load typed workflow tools: $($missingTools -join ', '). Discovered: $(Format-DiscoveredNames -Names $toolNames)." }
 
     Write-Host "OpenCode smoke test passed: $($expectedAgents.Count) agents, $($expectedCommands.Count) commands, and $($expectedTools.Count) typed tools discovered."
 }
