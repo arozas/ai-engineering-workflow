@@ -67,6 +67,7 @@ foreach ($required in @(
     'template\.ai\scripts\workflow-state.ps1',
     'template\.ai\scripts\run-quality-gates.ps1',
     'template\.ai\scripts\record-review.ps1',
+    'template\.ai\scripts\check-workflow-runtime.ps1',
     'template\.ai\scripts\validate-diagnosis.ps1',
     'template\.ai\scripts\validate-commit-message.ps1',
     'template\.ai\scripts\create-branch.ps1',
@@ -87,6 +88,7 @@ foreach ($required in @(
     'template\.opencode\commands\quick-fix.md',
     'template\.opencode\commands\small-task.md',
     'template\.opencode\commands\ai-refresh.md',
+    'template\.opencode\commands\workflow-doctor.md',
     'template\.opencode\commands\run-status.md',
     'template\.opencode\commands\diagnose.md',
     'template\.opencode\commands\commit.md',
@@ -152,6 +154,12 @@ foreach ($managedScript in @('delivery-check.ps1', 'fast-path-check.ps1', 'valid
         $errors += "opencode.json must not automatically allow managed script $managedScript through a raw shell pattern."
     }
 }
+foreach ($guardedScriptPath in @(Get-ChildItem -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts') -Filter '*.ps1' -File)) {
+    $guardedScriptContent = Get-Content -LiteralPath $guardedScriptPath.FullName -Raw
+    if ($guardedScriptContent -notmatch [regex]::Escape('$PSVersionTable.PSVersion.Major -lt 7')) {
+        $errors += "Managed script must reject PowerShell versions below 7: $($guardedScriptPath.Name)."
+    }
+}
 foreach ($sensitivePattern in @('*.npmrc', '*.pypirc', '*.pem', '*.key', '*credentials*.json', '*secrets*.json')) {
     $escaped = [regex]::Escape('"resource": "' + $sensitivePattern + '", "effect": "deny"')
     if ($openCodeConfigContent -notmatch $escaped) { $errors += "opencode.json must deny sensitive path pattern $sensitivePattern." }
@@ -167,6 +175,9 @@ $bootstrapEnricherAgentContent = Get-Content -LiteralPath (Join-Path $workflowRo
 $evidenceReaderAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\evidence-reader.md') -Raw
 $rootAgentsContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\AGENTS.md') -Raw
 $bootstrapCommandContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\commands\ai-bootstrap.md') -Raw
+$workflowStateSkillContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\skills\workflow-state\SKILL.md') -Raw
+$runtimeDoctorCommandContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\commands\workflow-doctor.md') -Raw
+$runtimeDoctorScriptContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\check-workflow-runtime.ps1') -Raw
 $projectContextSkillContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\skills\project-context\SKILL.md') -Raw
 $repoBootstrapSkillContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\skills\repo-bootstrap\SKILL.md') -Raw
 $projectProfilerSkillContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\skills\project-profiler\SKILL.md') -Raw
@@ -246,6 +257,21 @@ foreach ($toolExport in @('state', 'next', 'standard_review', 'quick_review', 'g
 if ($typedToolContent -notmatch [regex]::Escape('Bun.spawn(["pwsh", "-NoProfile", "-File", scriptPath, ...args]') -or
     $typedToolContent -match '(?m)Bun\.spawn\(`') {
     $errors += 'Typed workflow tools must invoke PowerShell with an argument vector, never an interpolated shell string.'
+}
+foreach ($transportToken in @('lastTransitionTransport', '"-Transport", "typed-tool"')) {
+    if ($typedToolContent -notmatch [regex]::Escape($transportToken)) {
+        $errors += "Typed workflow tools are missing transport evidence: $transportToken."
+    }
+}
+foreach ($transportPolicyToken in @('initial callable-tool catalog', 'pwsh -NoProfile -File', '-Transport deterministic-script', 'Do not search', 'Never fall back after')) {
+    if ($rootAgentsContent -notmatch [regex]::Escape($transportPolicyToken) -and $workflowStateSkillContent -notmatch [regex]::Escape($transportPolicyToken)) {
+        $errors += "Deterministic transport policy is missing: $transportPolicyToken."
+    }
+}
+foreach ($runtimeDoctorToken in @('Get-Command opencode2 -All', 'Multiple opencode2 commands', 'minimumMajor', 'pwsh -NoProfile -File .ai/scripts/check-workflow-runtime.ps1')) {
+    if ($runtimeDoctorScriptContent -notmatch [regex]::Escape($runtimeDoctorToken) -and $runtimeDoctorCommandContent -notmatch [regex]::Escape($runtimeDoctorToken)) {
+        $errors += "Runtime preflight contract is missing: $runtimeDoctorToken."
+    }
 }
 foreach ($compactToolToken in @('limit = 4_000', 'function nextActions', 'function compactState', 'function compactGate', 'do not rerun unchanged gates')) {
     if ($typedToolContent -notmatch [regex]::Escape($compactToolToken)) {
@@ -390,8 +416,16 @@ foreach ($reviewDefinition in @{
     if ($reviewDefinition.Value -notmatch '(?ms)- action:\s*shell\s+resource:\s*"\*"\s+effect:\s*deny') {
         $errors += "$($reviewDefinition.Key) must deny all shell commands."
     }
-    if ($reviewDefinition.Value -match '(?ms)- action:\s*shell\s+resource:\s*"(?!\*)[^"]+"\s+effect:\s*(allow|ask)') {
-        $errors += "$($reviewDefinition.Key) must not reopen shell permissions after the deny rule."
+    $shellExceptions = @([regex]::Matches($reviewDefinition.Value, '(?ms)- action:\s*shell\s+resource:\s*"(?<resource>(?!\*)[^"]+)"\s+effect:\s*(?<effect>allow|ask)'))
+    if ($reviewDefinition.Key -eq 'diagnostician') {
+        if ($shellExceptions.Count -gt 0) { $errors += 'diagnostician must not reopen shell permissions after the deny rule.' }
+    }
+    else {
+        $expectedRole = if ($reviewDefinition.Key -eq 'reviewer') { 'reviewer' } else { 'quick-reviewer' }
+        $expectedRecorder = "pwsh -NoProfile -File .ai/scripts/record-review.ps1 -RunId * -ReviewerRole $expectedRole -PayloadPath .ai/runtime/*/review-input.json -Transport deterministic-script"
+        if ($shellExceptions.Count -ne 1 -or $shellExceptions[0].Groups['resource'].Value -ne $expectedRecorder -or $shellExceptions[0].Groups['effect'].Value -ne 'ask') {
+            $errors += "$($reviewDefinition.Key) may reopen only its exact role-bound review recorder as ask."
+        }
     }
 }
 if ($diagnosticianAgentContent -notmatch '(?ms)- action:\s*edit\s+resource:\s*"\*"\s+effect:\s*deny' -or

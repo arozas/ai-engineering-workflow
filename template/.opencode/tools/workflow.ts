@@ -98,6 +98,7 @@ function compactState(value: any, exitCode: number): string {
       runId: value.runId,
       workflowPath: value.workflowPath,
       status: value.status,
+      lastTransitionTransport: value.lastTransitionTransport,
       currentSha: value.currentSha,
       affectedModules: value.qualityPlan?.affectedModuleIds || [],
       correctionBudget: {
@@ -218,6 +219,8 @@ async function recordReview(
         input.runId,
         "-ReviewerRole",
         reviewerRole,
+        "-Transport",
+        "typed-tool",
         "-PayloadPath",
         `.ai/runtime/${input.runId}/review-input.json`,
       ],
@@ -257,7 +260,7 @@ export const state = tool({
     reason: tool.schema.string().min(1).max(2000).optional(),
   },
   async execute(input, context) {
-    const args = ["-Action", input.action, "-RunId", input.runId]
+    const args = ["-Transport", "typed-tool", "-Action", input.action, "-RunId", input.runId]
     addValue(args, "-WorkflowPath", input.workflowPath)
     addValue(args, "-TaskType", input.taskType)
     addValue(args, "-SourceRunId", input.sourceRunId)
@@ -274,7 +277,7 @@ export const next = tool({
   description: "Return the compact current state and deterministic next legal actions for one workflow run.",
   args: { runId },
   async execute(input, context) {
-    return invokePowerShell("workflow-state.ps1", ["-Action", "Show", "-RunId", input.runId], context)
+    return invokePowerShell("workflow-state.ps1", ["-Transport", "typed-tool", "-Action", "Show", "-RunId", input.runId], context)
   },
 })
 

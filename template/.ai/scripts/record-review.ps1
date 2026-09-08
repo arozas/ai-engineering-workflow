@@ -2,11 +2,15 @@
 param(
     [Parameter(Mandatory = $true)][ValidatePattern('^[a-z0-9][a-z0-9-]{2,63}$')][string]$RunId,
     [Parameter(Mandatory = $true)][ValidateSet('reviewer', 'quick-reviewer')][string]$ReviewerRole,
-    [Parameter(Mandatory = $true)][string]$PayloadPath
+    [Parameter(Mandatory = $true)][string]$PayloadPath,
+    [ValidateSet('typed-tool', 'deterministic-script')][string]$Transport = 'deterministic-script'
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    throw 'AI Engineering Workflow requires PowerShell 7 or newer. Run this script with pwsh, not powershell.'
+}
 
 function Get-RepositoryRoot {
     $git = Get-Command git -ErrorAction SilentlyContinue
@@ -116,9 +120,9 @@ finally {
 }
 
 if ($null -ne $escalationReason) {
-    & $stateScriptPath -Action RecordReview -RunId $RunId -ArtifactPath ".ai/runtime/$RunId/review.json" -Verdict $verdict -Reason $escalationReason
+    & $stateScriptPath -Transport $Transport -Action RecordReview -RunId $RunId -ArtifactPath ".ai/runtime/$RunId/review.json" -Verdict $verdict -Reason $escalationReason
 }
 else {
-    & $stateScriptPath -Action RecordReview -RunId $RunId -ArtifactPath ".ai/runtime/$RunId/review.json" -Verdict $verdict
+    & $stateScriptPath -Transport $Transport -Action RecordReview -RunId $RunId -ArtifactPath ".ai/runtime/$RunId/review.json" -Verdict $verdict
 }
 if ($LASTEXITCODE -ne 0) { throw 'Review evidence was generated but workflow state rejected it.' }

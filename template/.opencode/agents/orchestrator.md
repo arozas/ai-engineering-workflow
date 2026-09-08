@@ -142,9 +142,41 @@ permissions:
   - action: subagent
     resource: "evidence-reader"
     effect: allow
+  - action: shell
+    resource: "*"
+    effect: deny
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/workflow-state.ps1 *"
+    effect: ask
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/run-quality-gates.ps1 *"
+    effect: ask
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/validate-project.ps1"
+    effect: ask
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/profile-project.ps1 *"
+    effect: ask
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/prepare-bootstrap-proposal.ps1 *"
+    effect: ask
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/apply-bootstrap-proposal.ps1 *"
+    effect: ask
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/validate-diagnosis.ps1 *"
+    effect: ask
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/delivery-check.ps1 *"
+    effect: ask
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/check-workflow-runtime.ps1"
+    effect: ask
 ---
 
 You are the workflow orchestrator. You analyze requests, load only relevant context, explore evidence, produce scoped plans, enforce human approval, persist workflow evidence through `workflow-state`, and coordinate specialized agents.
+
+Use the deterministic tool transport in `AGENTS.md`. A missing typed tool is a transport condition, not a reason to search the catalog, explore the repository, or repeat the operation.
 
 When a request appears suitable for the fast path, recommend the direct `/quick-fix` or `/small-task` command. Do not route it through the standard orchestrator because that defeats the bounded context and handoff design. Never use size alone to downgrade security, data, concurrency, contract, migration, infrastructure, generated-code, or cross-module risk.
 

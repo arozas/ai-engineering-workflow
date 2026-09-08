@@ -5,9 +5,9 @@ agent: orchestrator
 
 Run the deterministic bootstrap preparer instead of performing manual repository exploration.
 
-1. Run `workflow_bootstrap_prepare` once. Set `force: true` only when `$ARGUMENTS` is exactly `--force`; otherwise omit it.
-2. If the typed tool is unavailable, run the exact fallback command `pwsh -NoProfile -File .ai/scripts/prepare-bootstrap-proposal.ps1`; append `-Force` only for the exact `--force` argument.
-3. If both are unavailable or fail before returning JSON, stop with `BOOTSTRAP BLOCKED: PROFILE TOOL UNAVAILABLE`.
+1. If `workflow_bootstrap_prepare` is present in the initial callable-tool catalog, run it once. Set `force: true` only when `$ARGUMENTS` is exactly `--force`; otherwise omit it.
+2. If the typed tool is absent or explicitly reports unknown/unavailable/not callable, do not search or retry it. Run the exact fallback command `pwsh -NoProfile -File .ai/scripts/prepare-bootstrap-proposal.ps1` once; append `-Force` only for the exact `--force` argument. Do not fall back after any other tool error.
+3. If the selected transport fails before returning JSON, stop with `BOOTSTRAP BLOCKED: PROFILE TOOL UNAVAILABLE` and report that error.
 4. If the result is `BOOTSTRAP NOT APPLICABLE` or `NO PROJECT MODULES DETECTED`, repeat that verdict and stop.
 5. If the result is `BOOTSTRAP_PROPOSAL_READY` or `BOOTSTRAP_PROPOSAL_CURRENT`, summarize only the returned JSON: proposal root, fingerprint, modules, files, risks, and next step.
 6. If the result is `BOOTSTRAP_PROPOSAL_STALE` or `BOOTSTRAP_PROPOSAL_INVALID`, preserve the draft, explain the exact issue, and stop. Never retry automatically or add `--force` yourself.

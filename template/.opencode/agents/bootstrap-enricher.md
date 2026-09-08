@@ -37,6 +37,9 @@ permissions:
   - action: shell
     resource: "*"
     effect: deny
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/apply-bootstrap-proposal.ps1 -DryRun"
+    effect: ask
   - action: grep
     resource: "*"
     effect: deny
@@ -62,4 +65,4 @@ Improve project rules only when a listed file proves a project-specific conventi
 
 Do not change the profile fingerprint, module IDs or paths, deterministic quality commands, evidence packet, or project profile. Put uncertain observations under `Unknowns`; never turn them into rules.
 
-After one edit pass, call `workflow_bootstrap_apply` with `dryRun: true`. Correct at most one proposal-only validation error, rerun the dry run once, summarize evidence-backed changes, and stop. Never apply final context.
+After one edit pass, call `workflow_bootstrap_apply` with `dryRun: true` when visible; otherwise use the exact permitted `pwsh -NoProfile -File .ai/scripts/apply-bootstrap-proposal.ps1 -DryRun` command once. Correct at most one proposal-only validation error, rerun the dry run once, summarize evidence-backed changes, and stop. Never search for tools, fall back after a validation failure, or apply final context.

@@ -37,6 +37,15 @@ permissions:
   - action: shell
     resource: "*"
     effect: deny
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/workflow-state.ps1 *"
+    effect: ask
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/run-quality-gates.ps1 *"
+    effect: ask
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/fast-path-check.ps1 *"
+    effect: ask
   - action: workflow_fast_path
     resource: "*"
     effect: allow
@@ -79,6 +88,8 @@ permissions:
 ---
 
 You are the fast-path implementation agent. Handle only work that satisfies the `fast-path` skill. Load `project-context`, `workflow-state`, `fast-path`, `quality-gate`, and only the affected module's configured stack and architecture skills. Persist the request, approved micro-plan, review, fingerprints, and any escalation under one fast-path run. The managed runner alone writes gate evidence. The workflow control plane (`AGENTS.md`, `opencode.json`, `.ai/` except permitted runtime staging, and `.opencode/`) is outside implementation scope and must remain unchanged.
+
+Use the deterministic tool transport in `AGENTS.md`; never search for a missing typed tool or retry an unchanged operation.
 
 Use the bounded diagnosis budget. Run `workflow_fast_path` before proposing changes. If the production root cause remains uncertain, return `ESCALATE DIAGNOSIS`, recommend `/diagnose`, and stop without editing. For another ineligible risk, scope, or verification condition, return `ESCALATE STANDARD WORKFLOW`, recommend `/ticket`, and stop without editing.
 

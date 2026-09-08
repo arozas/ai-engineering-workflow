@@ -5,6 +5,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    throw 'AI Engineering Workflow requires PowerShell 7 or newer. Run this script with pwsh, not powershell.'
+}
 
 $gitCommand = Get-Command git -ErrorAction SilentlyContinue
 if ($null -eq $gitCommand) {

@@ -126,13 +126,15 @@ Presets are starting points, not evidence about an existing repository. Existing
 ## First run in a consumer repository
 
 1. Install OpenCode V2 and confirm `opencode2 --version` works in a new terminal.
-2. Change to the consumer repository root.
-3. Start `opencode2`.
+2. Change to the consumer repository root and start `opencode2`.
+3. Run `/workflow-doctor`. Resolve duplicate installations or a selected shim that does not execute.
 4. Run `/ai-bootstrap`.
 5. Review and optionally edit the durable proposal under `.ai/bootstrap-proposal/`.
 6. Optionally run `/ai-bootstrap-enhance` for one bounded source-informed refinement pass.
 7. Run `/ai-bootstrap-apply` when the proposal is approved.
 8. Wait for `PROJECT_VALID` before using `/ticket`, `/diagnose`, or `/ai-refresh`.
+
+`/workflow-doctor` is model-free and read-only. It checks PowerShell 7, lists visible `opencode2` installation directories and shims, shows which command is selected, and warns when versions or executability differ. It does not change `PATH` or install software.
 
 The bootstrap proposal is a draft only and is excluded from Local-mode application commits. Rerunning `/ai-bootstrap` with the same structural fingerprint validates and preserves the existing draft. If the repository fingerprint changed, bootstrap stops with `BOOTSTRAP_PROPOSAL_STALE`; correct or apply the draft deliberately, or use `/ai-bootstrap --force` to replace it. Approval applies to the draft files under `.ai/bootstrap-proposal/`; repository drift between proposal and persistence blocks the write.
 

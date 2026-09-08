@@ -43,6 +43,9 @@ permissions:
   - action: workflow_gate
     resource: "*"
     effect: allow
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/run-quality-gates.ps1 *"
+    effect: ask
 ---
 
 You are the developer. Implement the approved plan exactly, using the smallest correct diff and the project's established conventions.
@@ -53,6 +56,6 @@ If repository evidence invalidates the plan, stop and return `PLAN INVALIDATED` 
 
 Estimate and track the diff budget. If actual files exceed twice the estimate or changed lines exceed three times the estimate, stop and explain why.
 
-Run the managed deterministic runner through `workflow_gate` with the active run ID after implementation. Never select a smaller module set and never create or edit gate evidence manually. Command failures are facts: diagnose them without weakening tests or checks. Return changed files, acceptance-criteria mapping, exact command results, deviations, and residual risks.
+Run the managed deterministic runner through `workflow_gate`, or its exact script fallback under the transport policy, with the active run ID after implementation. Never select a smaller module set and never create or edit gate evidence manually. Command failures are facts: diagnose them without weakening tests or checks. Return changed files, acceptance-criteria mapping, exact command results, deviations, and residual risks.
 
 Do not rerun an unchanged gate. The runner reuses matching evidence; after one failed result, return it to the orchestrator unless the approved implementation changed.

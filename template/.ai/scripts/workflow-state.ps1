@@ -11,11 +11,15 @@ param(
     [string]$VerificationPath,
     [ValidateLength(1, 1000)][string]$AffectedModules,
     [ValidateSet('PASS', 'FAIL', 'ESCALATE')][string]$Verdict,
-    [ValidateLength(1, 2000)][string]$Reason
+    [ValidateLength(1, 2000)][string]$Reason,
+    [ValidateSet('typed-tool', 'deterministic-script')][string]$Transport = 'deterministic-script'
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    throw 'AI Engineering Workflow requires PowerShell 7 or newer. Run this script with pwsh, not powershell.'
+}
 
 $qualityPhaseOrder = @('restore', 'build', 'lint', 'typecheck', 'test', 'e2e')
 
@@ -585,6 +589,7 @@ function Read-State([string]$StatePath) {
 }
 
 function Write-State([System.Collections.IDictionary]$State, [string]$StatePath, [string]$SchemaPath) {
+    $State.lastTransitionTransport = $Transport
     $State.updatedAtUtc = [DateTime]::UtcNow.ToString('o')
     $json = $State | ConvertTo-Json -Depth 8
     $schema = Get-Content -LiteralPath $SchemaPath -Raw
@@ -705,6 +710,7 @@ if ($Action -eq 'Start') {
         maximumDiagnosticIterations = $maximumDiagnosticIterations
         createdAtUtc = $now
         updatedAtUtc = $now
+        lastTransitionTransport = $Transport
         escalationReason = $null
         artifacts = [ordered]@{}
     }

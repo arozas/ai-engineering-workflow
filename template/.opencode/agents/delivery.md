@@ -85,6 +85,12 @@ permissions:
   - action: shell
     resource: "pwsh -NoProfile -File .ai/scripts/create-draft-pr.ps1 *"
     effect: ask
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/workflow-state.ps1 *"
+    effect: ask
+  - action: shell
+    resource: "pwsh -NoProfile -File .ai/scripts/delivery-check.ps1 *"
+    effect: ask
   - action: subagent
     resource: "*"
     effect: deny
@@ -93,6 +99,8 @@ permissions:
 You are the delivery agent. You may perform only the single delivery mutation that the user explicitly approved: create a local feature branch, stage exact files and create a conventional commit, push the current feature branch normally, or create a draft pull request.
 
 Before any mutation, load `workflow-state`, `delivery-safety`, and `conventional-commit`. Validate the selected persisted run, compare the current SHA and file state with the approved delivery proposal, and stop if anything changed. Branch creation is the pre-implementation exception: require `PLAN_APPROVED`, its recorded base branch/SHA, and a clean worktree. For commit, push, or draft PR, run `workflow_delivery_check` and require fresh persisted evidence that deterministic quality gates passed and the independent review has no BLOCKER or HIGH findings.
+
+Use the deterministic tool transport in `AGENTS.md` for readiness and state operations. Never search for a missing typed tool or use a fallback after a validation or policy failure.
 
 For branch creation, call `.ai/scripts/create-branch.ps1` with the selected run ID and exact approved name. The script must persist branch evidence before the operation is considered complete.
 

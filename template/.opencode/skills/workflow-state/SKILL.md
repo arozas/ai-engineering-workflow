@@ -14,14 +14,14 @@ Use a lowercase run ID of 3-64 characters, for example `ticket-18427` or `quick-
 
 ## Required transitions
 
-Use only the typed `workflow_state` tool:
+Use the deterministic tool transport defined in `AGENTS.md`. Prefer the visible typed `workflow_state` tool; when it is absent or explicitly unavailable, invoke `.ai/scripts/workflow-state.ps1` exactly once with `pwsh -NoProfile -File` and `-Transport deterministic-script`. Do not search for a missing tool, use `powershell`, use `pwsh -Command`, compose shell expressions, or retry. Never fall back after a validation, policy, state, or execution failure.
 
 1. Choose a unique run ID, write the normalized request to `.ai/runtime/<run-id>/requirement.md`, then `Start` with `standard` or `fast-path`.
 2. Write the complete proposed plan to `.ai/runtime/<run-id>/plan.md` and a schema-valid `.ai/runtime/<run-id>/verification.json`. The manifest lists mandatory run-specific commands not already configured for the affected modules and is empty when none are needed.
 3. Only after explicit user approval of both artifacts, call `ApprovePlan` with the exact plan, verification path, and every affected module ID. The script copies and hashes both artifacts and freezes the exact merged project plus run-specific quality-command matrix.
 4. If an approved feature branch is needed, have `delivery` invoke `create-branch.ps1` with the run ID and exact approved name. The script persists `branch.json` through `RecordBranch` while state remains `PLAN_APPROVED`. Then call `BeginImplementation` before production or test edits.
 5. Run `workflow_gate` with the run ID. It writes factual gate evidence to `.ai/runtime/<run-id>/gates.json`; then call `RecordGates` with `PASS` or `FAIL`.
-6. Pass the exact persisted requirement, plan, diff packet, and gates to the read-only reviewer. The reviewer must call its exclusive typed review tool, which writes `.ai/runtime/<run-id>/review.json` and atomically records the derived verdict. Orchestrators and implementation agents must not write or record review evidence.
+6. Pass the exact persisted requirement, plan, diff packet, and gates to the independent reviewer. The reviewer must call its exclusive typed review tool or, only when unavailable, stage `.ai/runtime/<run-id>/review-input.json` and invoke the exact `record-review.ps1` fallback with its own role and `-Transport deterministic-script`. That script writes `.ai/runtime/<run-id>/review.json` and atomically records the derived verdict. Orchestrators and implementation agents must not write or record review evidence.
 7. Use `BeginCorrection` before an approved correction. The script enforces the workflow-specific limit.
 8. After exact paths and a Conventional Commit message are approved, have `delivery` invoke `commit-approved.ps1` with the run ID. The script writes `commit.json` and records it; state independently reads and validates the actual Git message, changed files, parent, branch, and gate-reviewed diff.
 9. Record an approved push and draft PR with `RecordPublish` and `RecordPullRequest` respectively.
@@ -41,7 +41,7 @@ Unknown production failures use a separate `diagnostic` path:
 
 Diagnostic transitions never authorize edits, implementation, production access, mitigations, or delivery.
 
-Run `Validate` before resuming or delivery. Artifact hashes, the approved module/command matrix, HEAD, the post-gate worktree fingerprint, and legal transitions are deterministic boundaries. Never edit `state.json` or canonical run artifacts directly. A state transition records evidence; it never replaces the user's required approval.
+Run `Validate` before resuming or delivery. Artifact hashes, the approved module/command matrix, HEAD, the post-gate worktree fingerprint, and legal transitions are deterministic boundaries. Never edit `state.json` or canonical run artifacts directly. A state transition records evidence; it never replaces the user's required approval. Report the persisted `lastTransitionTransport` after every transition.
 
 ## Review isolation
 

@@ -61,10 +61,11 @@ opencode2
 Run:
 
 ```text
+/workflow-doctor
 /ai-bootstrap
 ```
 
-Bootstrap profiles the project deterministically, writes an editable draft plus a bounded evidence packet under `.ai/bootstrap-proposal/`, and keeps the chat response compact. A second call preserves a current draft; use `/ai-bootstrap --force` only when you explicitly intend to replace it. Review or edit the draft, optionally run `/ai-bootstrap-enhance` with a stronger model for one bounded source-informed pass, then run:
+The doctor reports PowerShell and duplicate OpenCode installations without changing the machine. Bootstrap then profiles the project deterministically, writes an editable draft plus a bounded evidence packet under `.ai/bootstrap-proposal/`, and keeps the chat response compact. A second call preserves a current draft; use `/ai-bootstrap --force` only when you explicitly intend to replace it. Review or edit the draft, optionally run `/ai-bootstrap-enhance` with a stronger model for one bounded source-informed pass, then run:
 
 ```text
 /ai-bootstrap-apply
@@ -98,6 +99,7 @@ Project presets currently include `empty`, `dotnet-webapi`, `node-basic`, `pytho
 
 | Command | Purpose |
 | --- | --- |
+| `/workflow-doctor` | Report PowerShell and OpenCode runtime selection or duplicates without modifying the machine. |
 | `/ai-bootstrap` | Profile an existing repository and write an editable context proposal under `.ai/bootstrap-proposal/`. |
 | `/ai-bootstrap-enhance` | Optionally enrich the current draft from its bounded evidence packet without re-inventorying the repository. |
 | `/ai-bootstrap-apply` | Validate and apply the approved bootstrap proposal. |
@@ -164,7 +166,7 @@ pwsh -NoProfile -File .\tests\Run-Tests.ps1
 pwsh -NoProfile -File .\scripts\smoke-opencode.ps1
 ```
 
-The first two commands require Git and PowerShell and form the required CI gate. The smoke test additionally requires the OpenCode V2 CLI package (`@opencode-ai/cli@beta`) and the V2 executable (`opencode2`) because this template uses OpenCode V2 permissions. It starts a local model-free server and prefers runtime agent, command, and typed-tool discovery. Some V2 preview builds return empty discovery payloads or omit the tool endpoint; the default local smoke names a static fallback instead of presenting it as runtime discovery. `-RequireRuntimeDiscovery` rejects every fallback. A separate compatibility workflow runs strict mode against an exact pinned package for manual/tag checks and probes the latest beta in a non-blocking scheduled canary. The isolated suite also proves run-level staging, reviewer, branch, commit, remote publish, and draft-PR evidence binding.
+The first two commands require Git and PowerShell 7 and form the required CI gate. The smoke test additionally requires the OpenCode V2 CLI package (`@opencode-ai/cli@beta`) and the V2 executable (`opencode2`) because this template uses OpenCode V2 permissions. It starts a local model-free server and prefers runtime agent, command, and typed-tool discovery. Some V2 preview builds return empty discovery payloads or omit the tool endpoint; the default local smoke names a static fallback instead of presenting it as runtime discovery. `-RequireRuntimeDiscovery` rejects every fallback. Installed workflows remain usable when typed tools are unavailable through role-scoped, approval-gated deterministic script fallbacks; no MCP server is required. Run `/workflow-doctor` to detect PowerShell or duplicate-OpenCode runtime problems. A separate compatibility workflow runs strict mode against an exact pinned package for manual/tag checks and probes the latest beta in a non-blocking scheduled canary. The isolated suite proves both state transports plus run-level staging, reviewer, branch, commit, remote publish, and draft-PR evidence binding.
 
 ## OpenCode references
 

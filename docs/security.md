@@ -6,7 +6,7 @@ The workflow prevents an agent from converting a plausible narrative into unauth
 
 - least-privilege permissions;
 - explicit human approvals;
-- typed tools for automatically allowed deterministic operations;
+- typed tools when available, with role-scoped deterministic script fallbacks;
 - persisted state and artifact hashes;
 - control-plane and worktree fingerprints;
 - an exact approved quality matrix, including hashed run-specific verification;
@@ -19,15 +19,15 @@ The workflow prevents an agent from converting a plausible narrative into unauth
 
 `opencode.json` defines the baseline. Sensitive environment, key, package-credential, and credential/secret JSON patterns are denied. External directories are denied. Shell commands are generally `ask`; limited read-only Git/GitHub observations are allowed while destructive and publishing operations are denied.
 
-All `workflow_*` actions are globally denied. Agent files reopen only required tools. The orchestrator receives state, gate, profile, validation, diagnosis-validation, and delivery-readiness tools. Developer/tester receive only the gate tool. Quick-fix receives state, gate, and classifier. Delivery receives state and readiness plus separately approved scripts. The standard and quick reviewers receive only their respective review-recording tools and no shell or edit access. The diagnostician receives no shell or custom workflow tools.
+All `workflow_*` actions and managed script entry points are globally denied. Agent files reopen only required typed tools and exact script fallbacks. Fallback shell rules are `ask`, never automatic `allow`, and each role keeps a default `shell: deny`. Developer/tester may run only the gate script fallback, quick-fix only state/gate/classifier fallbacks, and reviewers only their role-bound recorder. Reviewer fallback staging is limited to `.ai/runtime/<run-id>/review-input.json`; application files remain read-only. The diagnostician receives no shell or custom workflow tools.
 
 OpenCode V2 permission rules are ordered and the last match wins. Review them in order. See [OpenCode permissions](https://opencode.ai/v2/docs/permissions).
 
-## Why typed tools replace shell wildcards
+## Two deterministic transports
 
 A V2 shell resource is a complete raw command. An automatically allowed rule ending in `*` can also match an appended shell suffix. That creates a command-composition boundary that is difficult to secure.
 
-`.opencode/tools/workflow.ts` instead:
+The preferred transport is `.opencode/tools/workflow.ts`, which:
 
 1. Defines bounded input schemas.
 2. Resolves scripts inside the active repository/worktree.
@@ -36,6 +36,10 @@ A V2 shell resource is a complete raw command. An automatically allowed rule end
 5. Returns structured exit code, stdout, and stderr.
 
 This prevents an argument from becoming `;`, `&&`, a pipeline, or an appended command at the permission boundary. Scripts still validate values as an independent layer. See [OpenCode custom tools](https://opencode.ai/docs/custom-tools).
+
+Some OpenCode V2 preview builds do not expose repository custom tools to the active model even when their definitions are valid. The workflow therefore supports a smaller compatibility transport: if a named typed tool is absent from the initial callable catalog or explicitly reports unavailable, the agent may invoke one exact script with `pwsh -NoProfile -File`. It must not search for tools, use `pwsh -Command`, compose shell expressions, retry, or fall back after a validation/policy failure. The role permission asks the user before that exact command runs.
+
+Both transports execute the same scripts and validations. State transitions persist `lastTransitionTransport` as `typed-tool` or `deterministic-script`; the fallback does not create a weaker state machine. No MCP server, extra long-lived process, or additional tool schema is required.
 
 ## Control-plane protection
 
@@ -55,7 +59,7 @@ All candidate artifacts use `.ai/runtime/<run-id>/<artifact>`. State rejects a c
 
 ## Reviewer independence
 
-Review independence is enforced by capability and evidence, not only by prompt wording. `workflow_state` does not expose `RecordReview`, and orchestrator/implementation roles are denied direct review-artifact edits. The two reviewer roles have different exclusive typed tools that always stamp the expected role and workflow path.
+Review independence is enforced by capability and evidence, not only by prompt wording. `workflow_state` does not expose `RecordReview`, and orchestrator/implementation roles are denied direct review-artifact edits. The two reviewer roles have different exclusive typed tools and exact role-bound script fallbacks that stamp the expected role and workflow path.
 
 The recorder recomputes severity counts and the verdict from structured findings, acceptance-criteria coverage, and escalation reason. State then validates the schema and independently binds the artifact to the current run, SHA, worktree fingerprint, and canonical gate hash. A reviewer cannot declare `PASS` while reporting a `BLOCKER`, `HIGH`, or uncovered acceptance criterion, and another role cannot complete the review through the normal state capability.
 

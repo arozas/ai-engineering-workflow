@@ -28,7 +28,7 @@ Do not create a separate agent merely for a new stack; stack knowledge belongs i
 
 ## Add a command
 
-Create `template/.opencode/commands/<command>.md`, select an existing primary agent, and describe the complete route and stopping conditions. Commands should orchestrate skills and typed tools rather than repeat large procedures.
+Create `template/.opencode/commands/<command>.md`, select an existing primary agent, and describe the complete route and stopping conditions. Commands should orchestrate skills and the deterministic tool transport rather than repeat large procedures.
 
 Commands that write production code must point to an approval-bearing route. Commands that mutate Git or external systems require a separate proposal and permission boundary.
 
@@ -47,7 +47,7 @@ For each operation:
 7. Reopen the exact action only for agents that require it.
 8. Add static and isolated tests for both allowed behavior and abuse cases.
 
-Do not replace a typed tool with an automatically allowed `shell` resource ending in `*`.
+Do not replace a typed tool with an automatically allowed `shell` resource ending in `*`. If preview compatibility requires a script fallback, globally deny the script, reopen only its direct `pwsh -NoProfile -File` form as `ask` for the required role, and add the mapping to the fail-closed transport policy. Never permit `pwsh -Command` or fallback after a semantic tool failure.
 
 ## Add a project preset
 
@@ -91,7 +91,7 @@ It verifies:
 - agent/command frontmatter and skill names;
 - sensitive-path, reviewer-exclusive tool, and direct-evidence-write permission invariants;
 - absence of automatic managed-script shell allowances;
-- presence and argument-vector implementation of typed tools;
+- presence and argument-vector implementation of typed tools plus role-scoped script fallbacks;
 - quality runner/state matrix protections;
 - run-specific staging plus review, branch, commit, publish, and PR verification contracts;
 - installation metadata and Local-mode safety logic;
@@ -122,7 +122,7 @@ The suite creates a temporary Git consumer, installs Local mode, and exercises:
 - independently validated actual commit message, changed paths, and reviewed diff;
 - forged publish rejection plus real remote-ref verification;
 - GitHub draft-PR metadata verification through a deterministic CLI fixture;
-- reviewer isolation and typed-tool permissions;
+- reviewer isolation and typed/script transport permissions;
 - benchmark summarization and updater conflicts.
 
 Expected child-process failures are assertions, not suite failures. The test script explicitly exits zero only after all assertions pass.

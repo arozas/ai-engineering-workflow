@@ -52,10 +52,12 @@ The default route is designed to remain usable by small instruction-following mo
 - gate responses contain the verdict and failures while full command evidence remains on disk;
 - repeated bootstrap preserves a current draft, and repeated unchanged gates reuse validated evidence;
 - prompts define repeated unchanged inspection, delegation, classification, gate, or review calls as protocol violations.
+- missing typed tools use one exact deterministic script fallback without tool search or retries;
+- the compatibility path requires no MCP server, so it adds no MCP tool schemas or long-lived server context to each model turn.
 
 For bootstrap, `/ai-bootstrap` is the economical deterministic baseline. `/ai-bootstrap-enhance` is an optional second stage for a stronger model. It reads only the generated evidence packet and representative files, so a larger model can extract semantic local conventions without reopening an unlimited repository search. The large model is not artificially restricted to the small model's reasoning quality; both share the same safety and iteration boundaries.
 
-These controls prevent unbounded behavior; they cannot guarantee that every small model follows every instruction or produces the same plan quality as a frontier model. If a model reaches its step limit, repeats a tool call, invents missing evidence, or fails a structured handoff, treat that as an evaluation failure and switch the affected role to a stronger model. Do not increase all step budgets first.
+These controls prevent unbounded behavior; they cannot guarantee that every small model follows every instruction or produces the same plan quality as a frontier model. If a model reaches its step limit, repeats a tool call, invents missing evidence, or fails a structured handoff, treat that as an evaluation failure and switch the affected role to a stronger model. Do not increase all step budgets first. Large models follow the same transport policy but retain the full evidence packet and reasoning budget; the fallback does not reduce their analytical capability.
 
 ## Efficiency mechanisms
 

@@ -63,7 +63,7 @@ The runner writes `.ai/runtime/<run-id>/gates.json`. If the run, project, runner
 
 ### Review
 
-The orchestrator constructs an exact packet from the requirement, plan, diff, and gates. The reviewer receives it without shell or edit access and reports structured findings plus acceptance-criteria coverage through its exclusive typed tool. The tool creates `review.json`, binds it to the current SHA, reviewed worktree, and canonical gate hash, derives the verdict, and records the transition atomically. The orchestrator cannot call `RecordReview` through its general state tool or author the canonical verdict.
+The orchestrator constructs an exact packet from the requirement, plan, diff, and gates. The reviewer receives it without application edit or general shell access and reports structured findings plus acceptance-criteria coverage through its exclusive typed tool or exact role-bound recorder fallback. The recorder creates `review.json`, binds it to the current SHA, reviewed worktree, and canonical gate hash, derives the verdict, and records the transition atomically. The orchestrator cannot call `RecordReview` through its general state tool or author the canonical verdict.
 
 A `BLOCKER` or `HIGH` finding requires an approved correction, a full gate rerun, and another review. Project policy limits correction cycles to one through three. Exhausting the limit requires human intervention.
 

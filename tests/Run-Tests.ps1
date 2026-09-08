@@ -78,7 +78,7 @@ try {
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-Mode', 'Local') | Out-Null
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local installation remains invisible to Git.'
     $metadata = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\workflow-installation.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($metadata.workflowVersion -eq '1.13.0') -Message 'Installed metadata records version 1.13.0.'
+    Assert-True -Condition ($metadata.workflowVersion -eq '1.14.0') -Message 'Installed metadata records version 1.14.0.'
 
     $profileScript = Join-Path $repositoryRoot '.ai\scripts\profile-project.ps1'
     $profileOutput = Invoke-PowerShell -ScriptPath $profileScript -Arguments @('-OutputPath', '.ai/project-profile.json') -WorkingDirectory $repositoryRoot
@@ -269,7 +269,9 @@ Applies to `src/app`.
     $missingVerificationRunId = 'gate-missing-verification'
     Set-Content -LiteralPath (Get-RunRuntimePath $missingVerificationRunId 'requirement.md') -Value 'Reject approval without a verification manifest.' -Encoding utf8
     Set-Content -LiteralPath (Get-RunRuntimePath $missingVerificationRunId 'plan.md') -Value 'This plan intentionally omits verification.json.' -Encoding utf8
-    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $missingVerificationRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', (Get-RunRuntimeRelativePath $missingVerificationRunId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Transport', 'typed-tool', '-Action', 'Start', '-RunId', $missingVerificationRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', (Get-RunRuntimeRelativePath $missingVerificationRunId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
+    $typedTransportState = Get-Content -LiteralPath (Join-Path $repositoryRoot ".ai\runs\$missingVerificationRunId\state.json") -Raw | ConvertFrom-Json
+    Assert-True -Condition ($typedTransportState.lastTransitionTransport -eq 'typed-tool') -Message 'Typed-tool state transitions persist their transport.'
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $missingVerificationRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $missingVerificationRunId 'plan.md'), '-AffectedModules', 'app') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
     Assert-True -Condition $true -Message 'Plan approval rejects a missing run-specific verification manifest.'
 
@@ -283,6 +285,8 @@ Applies to `src/app`.
         reason = 'Unsafe fixture that must be rejected.'
     })
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $unsafeVerificationRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', (Get-RunRuntimeRelativePath $unsafeVerificationRunId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
+    $scriptTransportState = Get-Content -LiteralPath (Join-Path $repositoryRoot ".ai\runs\$unsafeVerificationRunId\state.json") -Raw | ConvertFrom-Json
+    Assert-True -Condition ($scriptTransportState.lastTransitionTransport -eq 'deterministic-script') -Message 'Deterministic-script state transitions persist their transport.'
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $unsafeVerificationRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $unsafeVerificationRunId 'plan.md'), '-VerificationPath', $unsafeVerificationPath, '-AffectedModules', 'app') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
     Assert-True -Condition $true -Message 'Plan approval rejects delivery and mutation commands from run-specific verification.'
 
@@ -693,7 +697,7 @@ exit 0
 
     $reviewer = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\reviewer.md') -Raw
     $quickReviewer = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\quick-reviewer.md') -Raw
-    Assert-True -Condition ($reviewer -notmatch 'resource:\s*"git ' -and $quickReviewer -notmatch 'resource:\s*"git ') -Message 'Review agents expose no shell exceptions.'
+    Assert-True -Condition ($reviewer -notmatch 'resource:\s*"git ' -and $quickReviewer -notmatch 'resource:\s*"git ' -and $reviewer -match 'record-review\.ps1.*ReviewerRole reviewer' -and $quickReviewer -match 'record-review\.ps1.*ReviewerRole quick-reviewer') -Message 'Review agents expose only their role-bound deterministic recorder fallback and no Git shell access.'
     $developer = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\developer.md') -Raw
     $quickFix = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\quick-fix.md') -Raw
     Assert-True -Condition ($developer -match 'resource:\s*"\.ai/\*"\s+effect:\s*deny' -and $quickFix -match 'resource:\s*"\.ai/runtime/\*/gates\.json"\s+effect:\s*deny') -Message 'Implementation agents deny control-plane edits and direct gate-evidence writes.'
@@ -703,6 +707,8 @@ exit 0
     $workflowTools = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\tools\workflow.ts') -Raw
     $installedBootstrapCommand = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\commands\ai-bootstrap.md') -Raw
     $installedBootstrapApplyCommand = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\commands\ai-bootstrap-apply.md') -Raw
+    $installedWorkflowStateSkill = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\workflow-state\SKILL.md') -Raw
+    $installedRuntimeDoctorCommand = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\commands\workflow-doctor.md') -Raw
     $installedProjectContextSkill = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\project-context\SKILL.md') -Raw
     $installedRepoBootstrapSkill = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\repo-bootstrap\SKILL.md') -Raw
     $installedProjectProfilerSkill = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\project-profiler\SKILL.md') -Raw
@@ -710,6 +716,11 @@ exit 0
     $installedSimpleLayeredArchitecture = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\architecture-simple-layered\SKILL.md') -Raw
     Assert-True -Condition ($installedOpenCode -notmatch 'run-quality-gates\.ps1 \*.*allow' -and $installedOpenCode -match '"action": "workflow_\*".*"effect": "deny"') -Message 'Managed scripts are not exposed through automatically allowed shell wildcards.'
     Assert-True -Condition ($workflowTools -match 'Bun\.spawn\(\["pwsh"' -and $workflowTools -match 'export const gate = tool' -and $workflowTools -match 'export const state = tool' -and $workflowTools -match 'export const next = tool' -and $workflowTools -match 'export const bootstrap_prepare = tool' -and $workflowTools -match 'export const bootstrap_apply = tool' -and $workflowTools -match 'limit = 4_000') -Message 'Typed workflow tools pass validated arguments and return bounded state, gate, and fallback output.'
+    Assert-True -Condition ($installedAgents -match 'initial callable-tool catalog' -and $installedWorkflowStateSkill -match 'Transport deterministic-script' -and $installedWorkflowStateSkill -match 'Never fall back after' -and $workflowTools -match 'lastTransitionTransport') -Message 'Typed and deterministic-script transports share fail-closed policy and persisted evidence.'
+    Assert-True -Condition ($installedRuntimeDoctorCommand -match 'check-workflow-runtime\.ps1' -and (Test-Path -LiteralPath (Join-Path $repositoryRoot '.ai\scripts\check-workflow-runtime.ps1'))) -Message 'Installed workflow includes the model-free runtime preflight.'
+    $runtimeDoctorOutput = Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\check-workflow-runtime.ps1') -Arguments @() -WorkingDirectory $repositoryRoot
+    $runtimeDoctor = ($runtimeDoctorOutput -join "`n") | ConvertFrom-Json
+    Assert-True -Condition ([int]$runtimeDoctor.powerShell.minimumMajor -eq 7 -and $runtimeDoctor.verdict -in @('RUNTIME_READY', 'RUNTIME_WARNING', 'RUNTIME_BLOCKED')) -Message 'Runtime preflight returns deterministic PowerShell and OpenCode selection evidence.'
     Assert-True -Condition ($installedAgents -match 'For `/ai-bootstrap`, do not load `project-context` first' -and $installedOrchestrator -match 'run `workflow_bootstrap_prepare`' -and $installedOrchestrator -match 'Do not read source files, list directories, load `project-context`, ask for bootstrap input') -Message 'Bootstrap precedence prevents AGENTS/orchestrator guidance from bypassing the deterministic preparer.'
     Assert-True -Condition ($installedProjectContextSkill -match 'If the current task is `/ai-bootstrap`, stop using this skill' -and $installedProjectContextSkill -match 'do not inspect files, ask for bootstrap input, or create project configuration from this skill') -Message 'project-context cannot bootstrap a missing project from ad hoc exploration.'
     Assert-True -Condition ($installedBootstrapCommand -match 'workflow_bootstrap_prepare' -and $installedBootstrapCommand -match 'prepare-bootstrap-proposal\.ps1' -and $installedBootstrapCommand -match 'Do not read source files' -and $installedBootstrapCommand -match '\.ai/bootstrap-proposal/project\.json') -Message 'Bootstrap command delegates proposal creation to the deterministic preparer.'

@@ -8,6 +8,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    throw 'AI Engineering Workflow requires PowerShell 7 or newer. Run this script with pwsh, not powershell.'
+}
 
 $distributionRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $isWindowsPlatform = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
@@ -442,7 +445,7 @@ try {
     }
 
     $expectedAgents = @('orchestrator', 'developer', 'reviewer', 'tester', 'delivery', 'diagnostician', 'quick-fix', 'quick-reviewer', 'bootstrap-enricher', 'evidence-reader')
-    $expectedCommands = @('ai-bootstrap', 'ai-bootstrap-apply', 'ai-bootstrap-enhance', 'ai-refresh', 'branch', 'commit', 'delivery-check', 'diagnose', 'explain', 'implement', 'pr', 'pr-create', 'publish', 'quick-fix', 'review', 'run-status', 'small-task', 'test', 'ticket')
+    $expectedCommands = @('ai-bootstrap', 'ai-bootstrap-apply', 'ai-bootstrap-enhance', 'ai-refresh', 'branch', 'commit', 'delivery-check', 'diagnose', 'explain', 'implement', 'pr', 'pr-create', 'publish', 'quick-fix', 'review', 'run-status', 'small-task', 'test', 'ticket', 'workflow-doctor')
     $expectedTools = @('workflow_state', 'workflow_next', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_fast_path', 'workflow_validate_project', 'workflow_profile_project', 'workflow_bootstrap_prepare', 'workflow_bootstrap_apply', 'workflow_validate_diagnosis', 'workflow_delivery_check')
 
     $agents = Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/agent', '/api/agent') -Description 'agents' -Directory $consumerRoot

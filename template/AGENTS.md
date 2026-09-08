@@ -8,6 +8,14 @@ At the start of ticket analysis, implementation, review, testing, or any non-boo
 
 For an existing run, call `workflow_next` once and perform one returned legal action. Do not repeat unchanged state, profile, gate, classifier, review, delegation, or search operations. Stop at the next approval, blocker, escalation, or terminal state.
 
+## Deterministic tool transport
+
+Prefer a named `workflow_*` typed tool only when it is present in the initial callable-tool catalog. Call it at most once. If it is absent, or that call explicitly reports that the tool is unknown, unavailable, removed, or not callable, do not search for tools or retry it: run the matching audited script once with `pwsh -NoProfile -File`. A validation, policy, state, or script error is not a transport failure and must stop the workflow; never use the fallback to bypass it.
+
+The script mapping is: `workflow_state` and `workflow_next` -> `.ai/scripts/workflow-state.ps1` (always pass `-Transport deterministic-script`); `workflow_gate` -> `run-quality-gates.ps1`; `workflow_fast_path` -> `fast-path-check.ps1`; `workflow_validate_project` -> `validate-project.ps1`; `workflow_profile_project` -> `profile-project.ps1`; `workflow_bootstrap_prepare` -> `prepare-bootstrap-proposal.ps1`; `workflow_bootstrap_apply` -> `apply-bootstrap-proposal.ps1`; `workflow_validate_diagnosis` -> `validate-diagnosis.ps1`; `workflow_delivery_check` -> `delivery-check.ps1`; and reviewer tools -> `record-review.ps1` with the exact role and `-Transport deterministic-script`.
+
+Fallback commands must be direct argument-vector invocations. Never use `powershell`, `pwsh -Command`, tool search, shell composition, redirection, interpolation, or automatic retries. Report `lastTransitionTransport` from persisted state so the user can see whether `typed-tool` or `deterministic-script` performed the transition.
+
 ## Unknown production failures
 
 Use `/diagnose` when a production symptom is known but its cause is not. The diagnostic path is read-only, evidence-driven, persisted, and limited to three hypothesis iterations. The `diagnostician` has no edit, shell, subagent, production, secret, or delivery access. It may analyze only the exact sanitized evidence packet and repository files.
@@ -16,7 +24,7 @@ Do not use urgency to route an unknown incident through `/quick-fix`. Do not imp
 
 ## Fast path
 
-Use `/quick-fix` for a bounded bug fix and `/small-task` for bounded documentation, local configuration, or mechanical work. Both commands must load `fast-path`, run the typed `workflow_fast_path` tool, present one compact micro-plan, and wait for explicit approval before editing.
+Use `/quick-fix` for a bounded bug fix and `/small-task` for bounded documentation, local configuration, or mechanical work. Both commands must load `fast-path`, run `workflow_fast_path` through the deterministic tool transport, present one compact micro-plan, and wait for explicit approval before editing.
 
 Fast-path work is limited to one module, three files, 120 added-plus-deleted lines, deterministic verification, no prohibited risk category, and at most one correction cycle. Quick-fix diagnosis may read at most two relevant production files and two relevant test files. An unclear production root cause requires `/diagnose`. Scope expansion, public contract, dependency, migration, generated code, authentication, authorization, secrets, data integrity, concurrency, CI/CD, infrastructure, deployment, cloud, or cross-module impact requires `/ticket` and the standard workflow.
 
@@ -43,7 +51,7 @@ Do not guess missing project conventions. Report uncertainty and ask for approva
 5. Wait for explicit human approval, then record `PLAN_APPROVED` before modifying production code.
 6. If a feature branch is needed, create it through the guarded run-aware script while the tree is clean and before implementation; require persisted branch evidence.
 7. Implement only the approved scope and record the deterministic gate evidence.
-8. Obtain an independent read-only review from the supplied evidence packet; the reviewer has no shell access and must record structured evidence through its exclusive typed tool.
+8. Obtain an independent review of the supplied evidence packet; the reviewer cannot edit application files and may record structured evidence only through its exclusive typed tool or its exact guarded script fallback.
 9. Record each correction cycle, then re-run the gate and review. Stop after the configured maximum of three standard-workflow review cycles. Fast-path work always stops after one correction cycle.
 10. Present an explanation and PR description for human review.
 11. Only when the user explicitly requests delivery, use the dedicated `delivery` agent for one approved branch, commit, normal feature-branch push, or draft PR operation at a time. Record the result in the same persisted run.
@@ -63,13 +71,13 @@ Do not guess missing project conventions. Report uncertainty and ask for approva
 
 ## Deterministic quality policy
 
-LLM judgment never overrides command results. Quality gates must run through the typed `workflow_gate` tool for an approved run; agents cannot select a smaller module set and must never create or edit `.ai/runtime/<run-id>/gates.json` manually. Planning must persist `.ai/runtime/<run-id>/verification.json`, even when its command list is empty. Mandatory task-specific commands absent from `.ai/project.json` must be explicitly approved there, copied and hashed with the plan, and merged into the frozen matrix. A gate passes only when every command in that approved matrix exits successfully, in order, and the worktree remains unchanged during verification. Missing, skipped, or unexecuted required commands must be reported as NOT RUN, never PASS. `workflow_state` independently validates the run ID, exact module and command matrix, verification manifest, schema, project and runner hashes, derived verdict, worktree fingerprint, and control-plane fingerprint.
+LLM judgment never overrides command results. Quality gates must run through `workflow_gate` or its exact deterministic script fallback for an approved run; agents cannot select a smaller module set and must never create or edit `.ai/runtime/<run-id>/gates.json` manually. Planning must persist `.ai/runtime/<run-id>/verification.json`, even when its command list is empty. Mandatory task-specific commands absent from `.ai/project.json` must be explicitly approved there, copied and hashed with the plan, and merged into the frozen matrix. A gate passes only when every command in that approved matrix exits successfully, in order, and the worktree remains unchanged during verification. Missing, skipped, or unexecuted required commands must be reported as NOT RUN, never PASS. `workflow_state` or its exact fallback independently validates the run ID, exact module and command matrix, verification manifest, schema, project and runner hashes, derived verdict, worktree fingerprint, and control-plane fingerprint.
 
 `AGENTS.md`, `opencode.json`, `.ai/`, and `.opencode/` form the workflow control plane. Developer and quick-fix work must not modify it. Agent permissions block direct control-plane edits, and persisted runs fingerprint the control plane so a change invalidates later gate, review, and delivery transitions. Configuration changes require a separate explicitly approved task and a new workflow run.
 
 ## Review policy
 
-Review findings use `BLOCKER`, `HIGH`, `MEDIUM`, `LOW`, or `NIT` and include file, line, category, evidence, impact, and recommended fix. Any BLOCKER or HIGH finding, or incomplete acceptance-criteria coverage, makes the verdict FAIL. The reviewer never edits files or executes shell commands; it assesses only the supplied evidence packet and records through `workflow_standard_review` or `workflow_quick_review`. Orchestrator and implementation roles must not author or record review evidence.
+Review findings use `BLOCKER`, `HIGH`, `MEDIUM`, `LOW`, or `NIT` and include file, line, category, evidence, impact, and recommended fix. Any BLOCKER or HIGH finding, or incomplete acceptance-criteria coverage, makes the verdict FAIL. The reviewer never edits application files or runs general shell commands; it assesses only the supplied evidence packet and records through its exclusive typed tool or exact `record-review.ps1` fallback. Orchestrator and implementation roles must not author or record review evidence.
 
 ## Delivery and safety boundary
 

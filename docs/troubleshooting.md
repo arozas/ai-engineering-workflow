@@ -10,6 +10,14 @@ opencode2 --version
 
 This workflow uses OpenCode V2 configuration and permissions, so the command is `opencode2`. Installing this repository does not install the OpenCode CLI.
 
+After installation, run `/workflow-doctor` from OpenCode or invoke the same read-only check directly:
+
+```powershell
+pwsh -NoProfile -File .ai/scripts/check-workflow-runtime.ps1
+```
+
+`RUNTIME_WARNING` commonly means multiple global installations or shims are visible. Use the reported `selectedOpenCode`, installation directories, versions, and callable flags to correct `PATH`; then restart PowerShell and OpenCode. The doctor never changes the machine.
+
 ## Installation reports conflicts
 
 The installer refuses to overwrite existing managed destinations. Run with `-DryRun`, inspect each conflict, and decide whether it is an existing project instruction, an older managed installation, or unrelated content.
@@ -182,6 +190,16 @@ The workflow uses the current Node 24-based checkout action. If a runtime deprec
 Run `opencode2 --version`, then execute `scripts/smoke-opencode.ps1` locally. The test does not call a model; it verifies local server health and prefers runtime agent, command, and typed-tool discovery. Current V2 preview builds may return empty agent/command payloads or omit typed-tool discovery; default mode verifies installed Markdown definitions and TypeScript exports statically and names each fallback. Use `-RequireRuntimeDiscovery` when selecting a pinned compatible release: it rejects all static fallbacks. The script is V2-only by default and safely launches Windows `.cmd` shims from paths containing spaces. If `opencode2` is missing from `PATH`, install the current V2 CLI or fix the terminal environment before retrying. Other failures usually mean the installed OpenCode version cannot parse `opencode.json` or the current preview changed its headless API behavior.
 
 Use `-AllowLegacyOpenCodeFallback` only for local compatibility investigation. The fallback may select the V1 `opencode` executable and is expected to reject this workflow's V2 permissions.
+
+## A `workflow_*` typed tool is unavailable
+
+This is a supported transport condition in V2 preview builds. The agent must inspect only the initial callable-tool catalog. When the named tool is absent—or one call explicitly says unknown, unavailable, removed, or not callable—it uses the role-approved deterministic script once. It must not search for tools or retry.
+
+The fallback is safe only when the command starts exactly with `pwsh -NoProfile -File .ai/scripts/` and names the documented script. State transitions also include `-Transport deterministic-script`. The permission prompt is expected because script fallbacks are `ask`, not `allow`.
+
+Do not approve commands containing `powershell`, `pwsh -Command`, `;`, `&&`, `|`, redirection, substitutions, or an unrelated script. If the typed tool returned a schema, validation, policy, stale-state, or transition error, the agent must stop; script fallback must never be used to bypass that result.
+
+After a successful state transition, inspect the reported `lastTransitionTransport`. Both `typed-tool` and `deterministic-script` run the same validator and persist the same canonical evidence. No MCP server is required.
 
 ## Collecting useful support evidence
 

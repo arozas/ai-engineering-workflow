@@ -50,10 +50,10 @@ Legitimate control-plane updates are separate configuration work. Existing appli
 | `orchestrator` | Primary | Requirement analysis, planning, approvals, state, routing, and evidence packets. | Project context and local runtime staging only. |
 | `developer` | Subagent | Implement an approved plan with the smallest correct diff. | Approved application paths; no control plane. |
 | `tester` | Subagent | Translate acceptance criteria into tests and execute the approved gate. | Established test locations only. |
-| `reviewer` | Subagent | Independent standard review. | Read-only; no shell. |
+| `reviewer` | Subagent | Independent standard review. | Application read-only; exact review-recorder fallback only. |
 | `diagnostician` | Subagent | Evaluate sanitized incident evidence and falsifiable hypotheses. | Read-only; no shell or subagents. |
 | `quick-fix` | Primary | Bounded low-risk implementation with one review and one correction maximum. | Approved fast-path application scope. |
-| `quick-reviewer` | Subagent | Compact independent review for fast-path work. | Read-only; no shell. |
+| `quick-reviewer` | Subagent | Compact independent review for fast-path work. | Application read-only; exact review-recorder fallback only. |
 | `delivery` | Subagent | One explicitly approved branch, commit, push, or draft PR operation. | Guarded scripts and exact approved paths only. |
 | `evidence-reader` | Subagent | One bounded source/test evidence pass for a precise planning question. | Read-only; eight steps, no shell or subagents. |
 | `bootstrap-enricher` | Subagent | Optional semantic refinement of a deterministic bootstrap draft. | Proposal-only edits from the bounded evidence packet; eight steps. |
@@ -122,7 +122,9 @@ A blocked diagnostic run may begin another explicitly approved bounded iteration
 
 OpenCode custom tools in `.opencode/tools/workflow.ts` expose typed operations such as `workflow_state`, `workflow_next`, `workflow_gate`, `workflow_standard_review`, `workflow_quick_review`, `workflow_fast_path`, `workflow_validate_project`, and `workflow_bootstrap_apply`. Each tool validates its arguments and starts PowerShell with an argument vector rather than constructing a shell command string. Model-facing state and gate responses are compact; complete evidence remains in persisted artifacts.
 
-The underlying scripts remain usable by maintainers and tests, but agents receive only the tools required by their roles. The global policy denies all `workflow_*` actions by default, after which agent definitions reopen exact actions.
+The same scripts form a compatibility transport when a preview runtime does not expose a typed tool. Agents inspect only the initial tool catalog, make at most one typed call, and on a genuine availability failure may run one exact `pwsh -NoProfile -File` command. They never search, compose shell text, retry, or use fallback after a semantic failure. State records which transport performed its last transition. This design requires no MCP server and keeps the deterministic state machine identical for small and large models.
+
+The underlying scripts remain usable by maintainers and tests, but agents receive only the tools and fallback commands required by their roles. The global policy denies all `workflow_*` actions and managed script entry points by default, after which agent definitions reopen exact actions as typed `allow` or script `ask`.
 
 ## Quality-plan binding
 
@@ -138,7 +140,7 @@ Root-level modules with path `.` are valid. Path canonicalization accepts the re
 
 ## Independent review binding
 
-The general state tool deliberately does not expose `RecordReview`. Only `reviewer` can call `workflow_standard_review`, and only `quick-reviewer` can call `workflow_quick_review`. Both agents remain read-only and have no shell access; their exclusive tool accepts a structured finding and coverage payload, then the deterministic script binds the result to the run ID, workflow path, expected reviewer role, current SHA, worktree fingerprint, and canonical gate hash.
+The general state tool deliberately does not expose `RecordReview`. Only `reviewer` can call `workflow_standard_review` or its exact `ReviewerRole=reviewer` script route, and only `quick-reviewer` can use the corresponding quick route. Both remain read-only for application code. Their exclusive route accepts a structured finding and coverage payload, then the deterministic script binds the result to the run ID, workflow path, expected reviewer role, current SHA, worktree fingerprint, and canonical gate hash.
 
 The final verdict is derived rather than trusted. Any `BLOCKER` or `HIGH` finding, or any `PARTIAL`/`MISSING` acceptance criterion, produces `FAIL`. A non-empty escalation reason produces `ESCALATE`; only complete coverage without high-severity findings produces `PASS`. The canonical `review.json` also contains recomputed severity counts, so a prose-only or internally inconsistent review cannot advance state.
 
