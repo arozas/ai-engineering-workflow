@@ -132,7 +132,7 @@ $architectureMarkers = @(
 )
 
 $ciFiles = @($files | Where-Object { $_ -match '(?i)(^\.github/workflows/|^\.gitlab-ci\.ya?ml$|(^|/)azure-pipelines[^/]*\.ya?ml$|(^|/)Jenkinsfile$)' })
-$testFiles = @($files | Where-Object { $_ -match '(?i)(^|/)(test|tests|spec|specs|__tests__)(/|$)|\.(test|tests|spec)\.[^/]+$' } | Select-Object -First 50)
+$testFiles = @($files | Where-Object { $_ -match '(?i)(^|/)(test|tests|spec|specs|__tests__)(/|$)|(?:Tests?|Specs?)\.(?:cs|fs|vb)$|\.(test|tests|spec)\.[^/]+$' } | Select-Object -First 50)
 $conventionFiles = @($files | Where-Object { $_ -match '(?i)(^|/)(\.editorconfig|Directory\.Build\.(props|targets)|global\.json|tsconfig[^/]*\.json|eslint[^/]*|\.eslintrc[^/]*|prettier[^/]*|\.prettierrc[^/]*|ruff\.toml|mypy\.ini|pytest\.ini)$' })
 
 $fingerprintParts = [System.Collections.Generic.List[string]]::new()

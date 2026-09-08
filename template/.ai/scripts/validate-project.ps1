@@ -26,6 +26,14 @@ function Resolve-RepositoryFile([string]$Path, [string]$Description) {
     return $resolved
 }
 
+function Test-Rfc3339Timestamp($Value) {
+    if ($Value -is [DateTime]) { $Value = $Value.ToString('o') }
+    else { $Value = [string]$Value }
+    if ($Value -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$') { return $false }
+    $parsed = [DateTimeOffset]::MinValue
+    return [DateTimeOffset]::TryParse($Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$parsed)
+}
+
 $resolvedProjectPath = Resolve-RepositoryFile -Path $ProjectPath -Description 'Project configuration'
 $resolvedSchemaPath = Resolve-RepositoryFile -Path $SchemaPath -Description 'Project schema'
 $projectJson = Get-Content -LiteralPath $resolvedProjectPath -Raw
@@ -35,6 +43,10 @@ if (-not ($projectJson | Test-Json -Schema $schemaJson -ErrorAction Stop)) {
 }
 $project = $projectJson | ConvertFrom-Json
 $errors = @()
+$projectAnalyzedAt = if ($project.PSObject.Properties.Name -contains 'profile') { $project.profile.analyzedAtUtc } else { '' }
+if (-not [string]::IsNullOrWhiteSpace($projectAnalyzedAt) -and -not (Test-Rfc3339Timestamp -Value $projectAnalyzedAt)) {
+    $errors += 'Project profile analyzedAtUtc must be an RFC 3339 timestamp.'
+}
 $moduleIds = @{}
 $referencedProjectSkills = @{}
 
@@ -91,6 +103,9 @@ if ($project.PSObject.Properties.Name -contains 'profile') {
             $errors += 'Persisted project profile does not validate against its schema.'
         }
         $profile = $profileJson | ConvertFrom-Json
+        if (-not (Test-Rfc3339Timestamp -Value $profile.scannedAtUtc)) {
+            $errors += 'Persisted project profile scannedAtUtc must be an RFC 3339 timestamp.'
+        }
         if ([string]$profile.structureFingerprint -ne [string]$project.profile.repositoryFingerprint) {
             $errors += 'Project configuration fingerprint does not match .ai/project-profile.json.'
         }
@@ -113,6 +128,9 @@ if ($project.PSObject.Properties.Name -contains 'profile') {
             $errors += 'Generated skills manifest does not validate against its schema.'
         }
         $generated = $generatedJson | ConvertFrom-Json
+        if (-not (Test-Rfc3339Timestamp -Value $generated.generatedAtUtc)) {
+            $errors += 'Generated skills manifest generatedAtUtc must be an RFC 3339 timestamp.'
+        }
         if ([string]$generated.repositoryFingerprint -ne [string]$profile.structureFingerprint) {
             $errors += 'Generated skills manifest fingerprint does not match the persisted profile.'
         }

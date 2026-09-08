@@ -4,6 +4,24 @@ mode: subagent
 color: "#36b37e"
 steps: 40
 permissions:
+  - action: skill
+    resource: "*"
+    effect: deny
+  - action: skill
+    resource: "project-context"
+    effect: allow
+  - action: skill
+    resource: "quality-gate"
+    effect: allow
+  - action: skill
+    resource: "stack-*"
+    effect: allow
+  - action: skill
+    resource: "architecture-*"
+    effect: allow
+  - action: skill
+    resource: "project-*"
+    effect: allow
   - action: subagent
     resource: "*"
     effect: deny
@@ -36,3 +54,5 @@ If repository evidence invalidates the plan, stop and return `PLAN INVALIDATED` 
 Estimate and track the diff budget. If actual files exceed twice the estimate or changed lines exceed three times the estimate, stop and explain why.
 
 Run the managed deterministic runner through `workflow_gate` with the active run ID after implementation. Never select a smaller module set and never create or edit gate evidence manually. Command failures are facts: diagnose them without weakening tests or checks. Return changed files, acceptance-criteria mapping, exact command results, deviations, and residual risks.
+
+Do not rerun an unchanged gate. The runner reuses matching evidence; after one failed result, return it to the orchestrator unless the approved implementation changed.

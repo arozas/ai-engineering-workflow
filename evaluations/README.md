@@ -17,6 +17,9 @@ Each run records:
 - final acceptance result
 - defects found after the workflow declared completion
 - the exact model profile used
+- tool calls and subagent delegations
+- duplicate tool calls and protocol violations
+- whether an agent exhausted its configured step budget
 
 Validate and summarize a result file:
 
@@ -26,4 +29,4 @@ pwsh -NoProfile -File .\scripts\summarize-evaluations.ps1 `
   -OutputPath "C:\Measurements\workflow-benchmark-summary.md"
 ```
 
-The summary reports averages and success rate by workflow path. Token savings are meaningful only when the compared paths use equivalent scenarios and model profiles; interpret mixed profiles separately.
+The summary reports cost, quality, and loop indicators by workflow path. A duplicate call means the same tool and materially unchanged arguments were issued without relevant state or repository change. A protocol violation includes repeated searches, repeated unchanged state/gate/classifier/review calls, recursive evidence delegation, or continuing past a required approval/stop boundary. Token savings are meaningful only when the compared paths use equivalent scenarios and model profiles; interpret mixed profiles separately.

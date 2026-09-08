@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [switch]$Force
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -98,6 +100,58 @@ function Get-ModuleFiles {
     return @($Files | Where-Object { ([string]$_).StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) })
 }
 
+function Get-LanguageId([string]$Path) {
+    switch ([IO.Path]::GetExtension($Path).ToLowerInvariant()) {
+        '.cs' { 'csharp' }
+        '.fs' { 'fsharp' }
+        '.vb' { 'visual-basic' }
+        '.java' { 'java' }
+        '.kt' { 'kotlin' }
+        '.kts' { 'kotlin' }
+        '.js' { 'javascript' }
+        '.jsx' { 'javascript' }
+        '.mjs' { 'javascript' }
+        '.cjs' { 'javascript' }
+        '.ts' { 'typescript' }
+        '.tsx' { 'typescript' }
+        '.mts' { 'typescript' }
+        '.cts' { 'typescript' }
+        '.py' { 'python' }
+        '.go' { 'go' }
+        '.rs' { 'rust' }
+        '.rb' { 'ruby' }
+        '.php' { 'php' }
+        '.swift' { 'swift' }
+        default { $null }
+    }
+}
+
+function Get-ModuleLanguages([string[]]$ModuleFiles) {
+    return @(
+        $ModuleFiles |
+            ForEach-Object { Get-LanguageId -Path ([string]$_) } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+            Sort-Object -Unique
+    )
+}
+
+function Test-DotnetTestProject([string]$RelativePath) {
+    if ($RelativePath -notmatch '\.(csproj|fsproj|vbproj)$') { return $false }
+    return Test-FileContains -RelativePath $RelativePath -Pattern '<IsTestProject>\s*true\s*</IsTestProject>|Microsoft\.NET\.Test\.Sdk|(?:xunit|nunit|mstest)'
+}
+
+function Test-RepositoryFilesContain {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Paths,
+        [Parameter(Mandatory = $true)][string]$Pattern
+    )
+
+    foreach ($path in $Paths) {
+        if (Test-FileContains -RelativePath $path -Pattern $Pattern) { return $true }
+    }
+    return $false
+}
+
 function Get-Frameworks {
     param(
         [Parameter(Mandatory = $true)]$Candidate
@@ -169,8 +223,12 @@ function Get-Quality {
 
     $hasDotnet = @($Candidate.evidence | Where-Object { $_ -match '\.(sln|slnx|csproj|fsproj|vbproj)$' }).Count -gt 0
     $hasNode = @($Candidate.evidence | Where-Object { $_ -match '(^|/)package\.json$' }).Count -gt 0
-    $hasTestEvidence = @($Profile.testFiles).Count -gt 0 -or @($ModuleFiles | Where-Object { $_ -match '(?i)(^|/)(test|tests|spec|specs)(/|$)|Tests?\.(csproj|fsproj|vbproj)$' }).Count -gt 0
-    $hasDotnetFormattingEvidence = @($Profile.conventionFiles | Where-Object { $_ -match '(?i)(^|/)(\.editorconfig|Directory\.Build\.(props|targets)|global\.json)$' }).Count -gt 0
+    $moduleTestFiles = @($ModuleFiles | Where-Object { $_ -match '(?i)(^|/)(test|tests|spec|specs|__tests__)(/|$)|(?:Tests?|Specs?)\.(?:cs|fs|vb)$|\.(test|tests|spec)\.[^/]+$' })
+    $dotnetProjects = @($Candidate.evidence | Where-Object { $_ -match '\.(csproj|fsproj|vbproj)$' })
+    $hasDotnetTestProject = @($dotnetProjects | Where-Object { Test-DotnetTestProject -RelativePath ([string]$_) }).Count -gt 0
+    $hasTestEvidence = $moduleTestFiles.Count -gt 0 -or $hasDotnetTestProject
+    $dotnetCommandEvidenceFiles = @($Profile.ciFiles + $Profile.conventionFiles | Sort-Object -Unique)
+    $hasDotnetFormattingEvidence = Test-RepositoryFilesContain -Paths $dotnetCommandEvidenceFiles -Pattern '(?i)(^|\s)dotnet\s+format(?:\s|$)'
 
     if ($hasDotnet) {
         return [ordered]@{
@@ -183,13 +241,35 @@ function Get-Quality {
         }
     }
     if ($hasNode) {
+        $package = Get-FirstManifest -Candidate $Candidate -Pattern '(^|/)package\.json$'
+        $packageObject = Get-Content -LiteralPath (Join-Path $repositoryRoot $package) -Raw | ConvertFrom-Json
+        $modulePrefix = if ([string]$Candidate.path -eq '.') { '' } else { ([string]$Candidate.path).TrimEnd('/') + '/' }
+        $moduleFileSet = @($ModuleFiles | ForEach-Object { [string]$_ })
+        $restore = @()
+        if ($moduleFileSet -contains ($modulePrefix + 'package-lock.json') -or $moduleFileSet -contains ($modulePrefix + 'npm-shrinkwrap.json')) {
+            $restore = @('npm ci')
+        }
+        elseif ($moduleFileSet -contains ($modulePrefix + 'pnpm-lock.yaml')) {
+            $restore = @('pnpm install --frozen-lockfile')
+        }
+        elseif ($moduleFileSet -contains ($modulePrefix + 'yarn.lock')) {
+            $packageManager = if ($packageObject.PSObject.Properties.Name -contains 'packageManager') { [string]$packageObject.packageManager } else { '' }
+            $restore = @(if ($packageManager -match '^yarn@(?:[2-9]|[1-9][0-9])') { 'yarn install --immutable' } else { 'yarn install --frozen-lockfile' })
+        }
+        elseif (@($moduleFileSet | Where-Object { $_ -match ('^' + [regex]::Escape($modulePrefix) + 'bun\.lockb?$') }).Count -gt 0) {
+            $restore = @('bun install --frozen-lockfile')
+        }
+
+        $scriptNames = if ($packageObject.PSObject.Properties.Name -notcontains 'scripts' -or $null -eq $packageObject.scripts) { @() } else { @($packageObject.scripts.PSObject.Properties.Name) }
+        $packageRunner = if ($restore.Count -gt 0 -and $restore[0] -match '^pnpm ') { 'pnpm' } elseif ($restore.Count -gt 0 -and $restore[0] -match '^yarn ') { 'yarn' } elseif ($restore.Count -gt 0 -and $restore[0] -match '^bun ') { 'bun run' } else { 'npm run' }
+        $runScript = { param([string]$Name) if ($packageRunner -eq 'yarn') { "yarn $Name" } else { "$packageRunner $Name" } }
         return [ordered]@{
-            restore = @('npm install')
-            build = @()
-            lint = @()
-            typecheck = @()
-            test = @(if ($hasTestEvidence) { 'npm test' })
-            e2e = @()
+            restore = @($restore)
+            build = @(if ($scriptNames -contains 'build') { & $runScript 'build' })
+            lint = @(if ($scriptNames -contains 'lint') { & $runScript 'lint' })
+            typecheck = @(if ($scriptNames -contains 'typecheck') { & $runScript 'typecheck' })
+            test = @(if ($hasTestEvidence -and $scriptNames -contains 'test') { if ($packageRunner -eq 'npm run') { 'npm test' } else { & $runScript 'test' } })
+            e2e = @(if ($scriptNames -contains 'e2e') { & $runScript 'e2e' })
         }
     }
     return [ordered]@{ restore = @(); build = @(); lint = @(); typecheck = @(); test = @(); e2e = @() }
@@ -230,6 +310,33 @@ if ($LASTEXITCODE -ne 0) {
 $profile = ($profileOutput -join "`n") | ConvertFrom-Json
 if (@($profile.moduleCandidates).Count -eq 0) { throw 'NO PROJECT MODULES DETECTED' }
 
+$proposalRoot = Resolve-RepositoryPath -Path '.ai/bootstrap-proposal' -Description 'Bootstrap proposal directory'
+$existingProposalProfilePath = Join-Path $proposalRoot 'project-profile.json'
+if (-not $Force -and (Test-Path -LiteralPath $existingProposalProfilePath -PathType Leaf)) {
+    $existingProfile = Get-Content -LiteralPath $existingProposalProfilePath -Raw | ConvertFrom-Json
+    if ([string]$existingProfile.structureFingerprint -ne [string]$profile.structureFingerprint) {
+        throw 'BOOTSTRAP_PROPOSAL_STALE: repository structure changed; explicitly run /ai-bootstrap --force to replace the draft.'
+    }
+
+    $existingApplyPath = Resolve-RepositoryPath -Path '.ai/scripts/apply-bootstrap-proposal.ps1' -Description 'Bootstrap proposal validator' -RequireFile
+    $existingDryRunOutput = @(& $existingApplyPath -DryRun)
+    if ($LASTEXITCODE -ne 0) {
+        throw "BOOTSTRAP_PROPOSAL_INVALID: preserve or correct the existing draft, or explicitly run /ai-bootstrap --force.`n$($existingDryRunOutput -join "`n")"
+    }
+
+    $existingProjectPath = Join-Path $proposalRoot 'project.json'
+    $existingProject = Get-Content -LiteralPath $existingProjectPath -Raw | ConvertFrom-Json
+    [ordered]@{
+        verdict = 'BOOTSTRAP_PROPOSAL_CURRENT'
+        proposalRoot = '.ai/bootstrap-proposal'
+        repositoryFingerprint = [string]$profile.structureFingerprint
+        projectName = [string]$existingProject.name
+        modules = @($existingProject.modules | ForEach-Object { [string]$_.id })
+        next = 'Review or edit .ai/bootstrap-proposal/, then run /ai-bootstrap-apply. Use /ai-bootstrap --force only to replace this draft.'
+    } | ConvertTo-Json -Depth 5
+    exit 0
+}
+
 $rawFiles = @(& $gitCommand.Source -C $repositoryRoot ls-files --cached --others --exclude-standard)
 if ($LASTEXITCODE -ne 0) { throw 'Unable to create the repository inventory.' }
 $files = @(
@@ -243,7 +350,17 @@ if ($files.Count -eq 0) { throw 'NO PROJECT MODULES DETECTED' }
 $bootstrapInputPath = Join-Path $repositoryRoot '.ai\bootstrap-input.json'
 $bootstrapInput = $null
 if (Test-Path -LiteralPath $bootstrapInputPath -PathType Leaf) {
-    $bootstrapInput = Get-Content -LiteralPath $bootstrapInputPath -Raw | ConvertFrom-Json
+    $bootstrapInputJson = Get-Content -LiteralPath $bootstrapInputPath -Raw
+    $bootstrapInputSchemaPath = Resolve-RepositoryPath -Path '.ai/bootstrap-input.schema.json' -Description 'Bootstrap input schema' -RequireFile
+    $bootstrapInputSchema = Get-Content -LiteralPath $bootstrapInputSchemaPath -Raw
+    if (-not ($bootstrapInputJson | Test-Json -Schema $bootstrapInputSchema -ErrorAction Stop)) {
+        throw '.ai/bootstrap-input.json failed schema validation.'
+    }
+    $bootstrapInput = $bootstrapInputJson | ConvertFrom-Json
+    $bootstrapCreatedAt = if ($bootstrapInput.createdAtUtc -is [DateTime]) { $bootstrapInput.createdAtUtc.ToString('o') } else { [string]$bootstrapInput.createdAtUtc }
+    if ($bootstrapCreatedAt -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$') {
+        throw '.ai/bootstrap-input.json createdAtUtc must be an RFC 3339 timestamp.'
+    }
 }
 
 $projectName = if ($null -ne $bootstrapInput -and $bootstrapInput.PSObject.Properties.Name -contains 'projectName' -and -not [string]::IsNullOrWhiteSpace([string]$bootstrapInput.projectName)) {
@@ -260,22 +377,13 @@ foreach ($candidate in @($profile.moduleCandidates)) {
     $index++
     $modulePath = [string]$candidate.path
     $moduleFiles = @(Get-ModuleFiles -ModulePath $modulePath -Files $files)
-    $languages = @(
-        foreach ($language in @($profile.languages)) {
-            $samplePaths = @($language.samplePaths | Where-Object {
-                $modulePath -eq '.' -or ([string]$_).StartsWith($modulePath.TrimEnd('/') + '/', [StringComparison]::OrdinalIgnoreCase)
-            })
-            if ($modulePath -eq '.' -or @($samplePaths).Count -gt 0) { [string]$language.id }
-        }
-    ) | Sort-Object -Unique
+    $languages = @(Get-ModuleLanguages -ModuleFiles $moduleFiles)
     if (@($languages).Count -eq 0) { $languages = @('unknown') }
     $frameworks = @(Get-Frameworks -Candidate $candidate)
     $stackSkills = @(Get-StackSkills -Languages $languages -Frameworks $frameworks)
     $architecture = Get-Architecture -ModuleFiles $moduleFiles
     $quality = Get-Quality -Candidate $candidate -ModuleFiles $moduleFiles -Profile $profile
     $contextSkills = @($stackSkills + @($architecture.contextSkills) | Sort-Object -Unique)
-    if (@($contextSkills).Count -eq 0) { $contextSkills = @('project-' + (Get-ModuleId -Path $modulePath -Index $index)) }
-
     $moduleId = Get-ModuleId -Path $modulePath -Index $index
     $modules.Add([ordered]@{
         id = $moduleId
@@ -286,7 +394,7 @@ foreach ($candidate in @($profile.moduleCandidates)) {
         contextSkills = @($contextSkills)
         quality = $quality
     })
-    $moduleEvidence.Add("- `$moduleId` at `$modulePath`: manifests $(@($candidate.evidence) -join ', '); languages $(@($languages) -join ', '); frameworks $(if (@($frameworks).Count -gt 0) { @($frameworks) -join ', ' } else { 'none proven' }); architecture $($architecture.rationale)")
+    $moduleEvidence.Add("- $moduleId at ${modulePath}: manifests $(@($candidate.evidence) -join ', '); languages $(@($languages) -join ', '); frameworks $(if (@($frameworks).Count -gt 0) { @($frameworks) -join ', ' } else { 'none proven' }); architecture $($architecture.rationale)")
 }
 
 $diagnosticCommands = @()
@@ -318,7 +426,7 @@ $project = [ordered]@{
     }
     profile = [ordered]@{
         repositoryFingerprint = [string]$profile.structureFingerprint
-        analyzedAtUtc = [string]$profile.scannedAtUtc
+        analyzedAtUtc = ([DateTime]$profile.scannedAtUtc).ToUniversalTime().ToString('o')
         source = '.ai/project-profile.json'
         generatedSkillsManifest = '.ai/generated-skills.json'
     }
@@ -332,10 +440,55 @@ $generatedSkills = [ordered]@{
     skills = @()
 }
 
+$declaredIntent = if ($null -eq $bootstrapInput) {
+    '- No .ai/bootstrap-input.json was provided.'
+}
+else {
+    @(
+        "- Project preset: $($bootstrapInput.projectPreset)",
+        "- Requested stacks: $(if (@($bootstrapInput.requestedStacks).Count -gt 0) { @($bootstrapInput.requestedStacks) -join ', ' } else { 'none' })",
+        "- Requested architectures: $(if (@($bootstrapInput.requestedArchitectures).Count -gt 0) { @($bootstrapInput.requestedArchitectures) -join ', ' } else { 'none' })",
+        '- Declared intent is recorded for review and is not treated as repository evidence.'
+    ) -join "`n"
+}
+
+$evidencePacketModules = @(
+    for ($moduleIndex = 0; $moduleIndex -lt $modules.Count; $moduleIndex++) {
+        $module = $modules[$moduleIndex]
+        $candidate = @($profile.moduleCandidates)[$moduleIndex]
+        $moduleFiles = @(Get-ModuleFiles -ModulePath ([string]$module.path) -Files $files)
+        $testPattern = '(?i)(^|/)(test|tests|spec|specs|__tests__)(/|$)|(?:Tests?|Specs?)\.(?:cs|fs|vb)$|\.(test|tests|spec)\.[^/]+$'
+        $representativeTests = @($moduleFiles | Where-Object { $_ -match $testPattern } | Select-Object -First 3)
+        $representativeSources = @(
+            $moduleFiles |
+                Where-Object {
+                    $null -ne (Get-LanguageId -Path ([string]$_)) -and
+                    $_ -notmatch $testPattern -and
+                    $_ -notmatch '(?i)(^|/)(bin|obj|dist|coverage|generated|migrations?)(/|$)|\.(g|generated|designer)\.[^/]+$'
+                } |
+                Select-Object -First 3
+        )
+        [ordered]@{
+            id = [string]$module.id
+            path = [string]$module.path
+            manifests = @($candidate.evidence)
+            representativeSourceFiles = $representativeSources
+            representativeTestFiles = $representativeTests
+            contextSkills = @($module.contextSkills)
+        }
+    }
+)
+$evidencePacket = [ordered]@{
+    version = 1
+    repositoryFingerprint = [string]$profile.structureFingerprint
+    maximumFilesToReadPerModule = 6
+    modules = $evidencePacketModules
+}
+
 $rules = @"
 # Project rules
 
-This file is a draft generated by `/ai-bootstrap`. Edit it before `/ai-bootstrap-apply` if any rule is incorrect.
+This file is a draft generated by /ai-bootstrap. Edit it before /ai-bootstrap-apply if any rule is incorrect.
 
 ## Project overview
 
@@ -355,12 +508,12 @@ $($moduleEvidence -join "`n")
 
 ## Quality gates
 
-- Run only commands listed in `.ai/project.json` for affected modules.
+- Run only commands listed in .ai/project.json for affected modules.
 - Empty quality phases mean no repository-evidenced command was detected for that phase.
 
 ## Production incidents
 
-- Unknown causes use `/diagnose`; urgency does not authorize `/quick-fix` or speculative implementation.
+- Unknown causes use /diagnose; urgency does not authorize /quick-fix or speculative implementation.
 - Supply only sanitized incident evidence. Production access, mitigation, rollback, restart, deployment, data repair, and cloud mutation remain outside diagnosis.
 
 ## Definition of done
@@ -371,12 +524,12 @@ Work is done only when acceptance criteria are mapped to evidence, configured qu
 $evidence = @"
 # Bootstrap evidence
 
-PROFILE FALLBACK USED: proposal prepared by `.ai/scripts/prepare-bootstrap-proposal.ps1`, which invokes `.ai/scripts/profile-project.ps1` directly.
+DETERMINISTIC PROFILE USED: proposal prepared by .ai/scripts/prepare-bootstrap-proposal.ps1 from .ai/scripts/profile-project.ps1 output.
 
 ## Deterministic profile
 
-- Fingerprint: `$($profile.structureFingerprint)`
-- Head SHA: `$($profile.headSha)`
+- Fingerprint: $($profile.structureFingerprint)
+- Head SHA: $($profile.headSha)
 - File count: $($profile.fileCount)
 - Languages: $(@($profile.languages | ForEach-Object { "$($_.id) ($($_.fileCount))" }) -join ', ')
 - Module candidates: $(@($profile.moduleCandidates | ForEach-Object { "$($_.path) [$(@($_.evidence) -join ', ')]" }) -join '; ')
@@ -389,24 +542,28 @@ PROFILE FALLBACK USED: proposal prepared by `.ai/scripts/prepare-bootstrap-propo
 
 $($moduleEvidence -join "`n")
 
+## Declared bootstrap intent
+
+$declaredIntent
+
 ## Conservative inference policy
 
 - Build and restore commands are proposed only when build manifests exist.
 - Test commands are empty unless test files or test projects are detected.
 - Lint commands are empty unless convention evidence is detected.
-- `architecture-simple-layered` is used for conventional controller/model/repository applications.
+- architecture-simple-layered is used for conventional controller/model/repository applications.
 - Clean, hexagonal, vertical-slice, and event-driven architectures are not inferred from directory names alone.
 
 ## Review instructions
 
 Edit these draft files before applying:
 
-- `.ai/bootstrap-proposal/project.json`
-- `.ai/bootstrap-proposal/project-rules.md`
-- `.ai/bootstrap-proposal/generated-skills.json`
-- `.ai/bootstrap-proposal/skills/project-<module-id>/SKILL.md` when present
+- .ai/bootstrap-proposal/project.json
+- .ai/bootstrap-proposal/project-rules.md
+- .ai/bootstrap-proposal/generated-skills.json
+- .ai/bootstrap-proposal/skills/project-<module-id>/SKILL.md when present
 
-Then run `/ai-bootstrap-apply`.
+Then run /ai-bootstrap-apply.
 "@
 
 $approval = @"
@@ -414,12 +571,11 @@ $approval = @"
 
 Review and edit the files in this directory.
 
-Run `/ai-bootstrap-apply` only after the proposal is correct.
+Run /ai-bootstrap-apply only after the proposal is correct.
 
-The apply step validates this draft, reruns the repository profiler, blocks on structural drift, writes the approved final files, and requires `PROJECT_VALID`.
+The apply step validates this draft, reruns the repository profiler, blocks on structural drift, writes the approved final files, and requires PROJECT_VALID.
 "@
 
-$proposalRoot = Resolve-RepositoryPath -Path '.ai/bootstrap-proposal' -Description 'Bootstrap proposal directory'
 if (-not (Test-Path -LiteralPath $proposalRoot -PathType Container)) {
     New-Item -ItemType Directory -Path $proposalRoot -Force | Out-Null
 }
@@ -427,6 +583,7 @@ if (-not (Test-Path -LiteralPath $proposalRoot -PathType Container)) {
 Write-JsonFile -Value $profile -Path '.ai/bootstrap-proposal/project-profile.json'
 Write-JsonFile -Value $project -Path '.ai/bootstrap-proposal/project.json'
 Write-JsonFile -Value $generatedSkills -Path '.ai/bootstrap-proposal/generated-skills.json'
+Write-JsonFile -Value $evidencePacket -Path '.ai/bootstrap-proposal/evidence-packet.json'
 Write-TextFile -Value $rules -Path '.ai/bootstrap-proposal/project-rules.md'
 Write-TextFile -Value $evidence -Path '.ai/bootstrap-proposal/evidence.md'
 Write-TextFile -Value $approval -Path '.ai/bootstrap-proposal/approval.md'
@@ -450,6 +607,7 @@ $dryRun = ($dryRunOutput -join "`n") | ConvertFrom-Json
         '.ai/bootstrap-proposal/project.json',
         '.ai/bootstrap-proposal/project-rules.md',
         '.ai/bootstrap-proposal/generated-skills.json',
+        '.ai/bootstrap-proposal/evidence-packet.json',
         '.ai/bootstrap-proposal/evidence.md',
         '.ai/bootstrap-proposal/approval.md'
     )

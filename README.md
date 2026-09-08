@@ -13,7 +13,7 @@ It converts tickets, specifications, written requirements, and unknown productio
 - Selective stack, architecture, and generated project skills per module.
 - Standard, fast-path, and production-diagnosis workflows.
 - Persisted, hash-verified run state under local `.ai/runs/` records, with isolated staging under `.ai/runtime/<run-id>/`.
-- An orchestrator plus specialized developer, tester, reviewer, diagnostician, quick-fix, and delivery agents.
+- An orchestrator plus specialized developer, tester, reviewer, diagnostician, quick-fix, delivery, bounded evidence-reader, and optional bootstrap-enricher agents.
 - Deterministic quality gates bound to the exact modules and commands approved in the plan.
 - Reviewer-scoped structured evidence whose verdict is derived from findings and acceptance-criteria coverage.
 - Read-only Azure DevOps work-item integration.
@@ -64,7 +64,7 @@ Run:
 /ai-bootstrap
 ```
 
-Bootstrap inspects the project, writes an editable draft under `.ai/bootstrap-proposal/`, and keeps the chat response compact. Review or edit the draft, then run:
+Bootstrap profiles the project deterministically, writes an editable draft plus a bounded evidence packet under `.ai/bootstrap-proposal/`, and keeps the chat response compact. A second call preserves a current draft; use `/ai-bootstrap --force` only when you explicitly intend to replace it. Review or edit the draft, optionally run `/ai-bootstrap-enhance` with a stronger model for one bounded source-informed pass, then run:
 
 ```text
 /ai-bootstrap-apply
@@ -99,6 +99,7 @@ Project presets currently include `empty`, `dotnet-webapi`, `node-basic`, `pytho
 | Command | Purpose |
 | --- | --- |
 | `/ai-bootstrap` | Profile an existing repository and write an editable context proposal under `.ai/bootstrap-proposal/`. |
+| `/ai-bootstrap-enhance` | Optionally enrich the current draft from its bounded evidence packet without re-inventorying the repository. |
 | `/ai-bootstrap-apply` | Validate and apply the approved bootstrap proposal. |
 | `/ai-refresh` | Propose context updates after structural repository changes. |
 | `/ticket` | Normalize a ticket/specification and propose a standard implementation plan. |
@@ -140,7 +141,7 @@ requirement
                          separately approved delivery operations
 ```
 
-The affected module IDs are persisted when the plan is approved. The quality runner accepts only a run ID, reconstructs the current matrix, and rejects stale configuration, omitted modules, altered commands, mismatched evidence, or worktree/control-plane drift.
+The affected module IDs are persisted when the plan is approved. `workflow_next` returns a compact status and legal next actions for resumed runs. The quality runner accepts only a run ID, reuses unchanged current evidence, reconstructs the matrix, and rejects stale configuration, omitted modules, altered commands, mismatched evidence, or worktree/control-plane drift.
 
 ## Documentation
 
@@ -163,7 +164,7 @@ pwsh -NoProfile -File .\tests\Run-Tests.ps1
 pwsh -NoProfile -File .\scripts\smoke-opencode.ps1
 ```
 
-The first two commands require Git and PowerShell and form the required CI gate. The smoke test additionally requires the OpenCode V2 CLI package (`@opencode-ai/cli@beta`) and the V2 executable (`opencode2`) because this template uses OpenCode V2 permissions. It starts a local model-free server and verifies that OpenCode discovers every installed agent, command, and typed workflow tool. The smoke test is intentionally manual while OpenCode V2 is beta; required CI remains deterministic and independent of beta runtime drift. The isolated suite also proves run-level staging, reviewer, branch, commit, remote publish, and draft-PR evidence binding.
+The first two commands require Git and PowerShell and form the required CI gate. The smoke test additionally requires the OpenCode V2 CLI package (`@opencode-ai/cli@beta`) and the V2 executable (`opencode2`) because this template uses OpenCode V2 permissions. It starts a local model-free server and prefers runtime agent, command, and typed-tool discovery. Some V2 preview builds return empty discovery payloads or omit the tool endpoint; in those cases the success message names the static definition/export fallback instead of presenting it as runtime discovery. The smoke test is intentionally manual while OpenCode V2 is beta; required CI remains deterministic and independent of beta runtime drift. The isolated suite also proves run-level staging, reviewer, branch, commit, remote publish, and draft-PR evidence binding.
 
 ## OpenCode references
 

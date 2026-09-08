@@ -18,7 +18,7 @@ Urgency never changes the route. An unknown one-line production bug is still a d
 
 ### Analyze
 
-Run `/ticket <ticket, specification, or requirement>`. The orchestrator normalizes the input into a persisted requirement, loads project context for affected modules, gathers bounded evidence, and proposes:
+Run `/ticket <ticket, specification, or requirement>`. The orchestrator normalizes the input into a persisted requirement, loads project context for affected modules, and delegates at most one precise repository question to the eight-step read-only `evidence-reader`. That agent performs no shell commands, reads at most six production and four test files, and cannot recursively delegate. The orchestrator then proposes:
 
 - observable acceptance criteria;
 - evidence and confidence;
@@ -58,7 +58,7 @@ The tester may add focused tests only in established test locations. If testing 
 
 Array order within a phase is preserved. An empty phase is `NOT CONFIGURED`. The first failure normally stops that module and later commands become `NOT RUN`. A module with no configured commands is incomplete, not passing.
 
-The runner writes `.ai/runtime/<run-id>/gates.json`. State accepts only that run-specific path and independently validates the run ID, module identities and paths, phases and commands, hashes, exit-derived status, and worktree stability before accepting it. Other active runs keep separate staging directories.
+The runner writes `.ai/runtime/<run-id>/gates.json`. If the run, project, runner, matrix, and worktree fingerprints are unchanged, a repeated gate request returns the existing validated artifact instead of executing commands again. `force: true` is reserved for an explicit intentional rerun. State accepts only that run-specific path and independently validates the run ID, module identities and paths, phases and commands, hashes, exit-derived status, and worktree stability before accepting it. Other active runs keep separate staging directories.
 
 ### Review
 
@@ -120,4 +120,4 @@ Merge, rebase, reset, release, deployment, secret mutation, and cloud mutation r
 
 ## Resuming work
 
-Use `/run-status <run-id>`. It validates artifact hashes and shows status, route, source diagnosis, Git state, quality plan, correction usage, and next legal action. If multiple nonterminal runs exist, commands require an exact ID and never guess.
+Use `/run-status <run-id>`. It validates artifact hashes and shows status, route, source diagnosis, Git state, quality plan, correction usage, and next legal action. Internally `workflow_next` returns a compact state summary; an agent must call it once, perform one returned action, and stop at the next approval, blocker, escalation, or terminal boundary. Repeating an unchanged state, gate, classifier, review, delegation, or search is a protocol violation. If multiple nonterminal runs exist, commands require an exact ID and never guess.

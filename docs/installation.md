@@ -128,9 +128,10 @@ Presets are starting points, not evidence about an existing repository. Existing
 3. Start `opencode2`.
 4. Run `/ai-bootstrap`.
 5. Review and optionally edit the durable proposal under `.ai/bootstrap-proposal/`.
-6. Run `/ai-bootstrap-apply` when the proposal is approved.
-7. Wait for `PROJECT_VALID` before using `/ticket`, `/diagnose`, or `/ai-refresh`.
+6. Optionally run `/ai-bootstrap-enhance` for one bounded source-informed refinement pass.
+7. Run `/ai-bootstrap-apply` when the proposal is approved.
+8. Wait for `PROJECT_VALID` before using `/ticket`, `/diagnose`, or `/ai-refresh`.
 
-The bootstrap proposal is a draft only. It may be overwritten by rerunning `/ai-bootstrap`, and it is excluded from Local-mode application commits. Approval applies to the draft files under `.ai/bootstrap-proposal/`; repository drift between proposal and persistence blocks the write.
+The bootstrap proposal is a draft only and is excluded from Local-mode application commits. Rerunning `/ai-bootstrap` with the same structural fingerprint validates and preserves the existing draft. If the repository fingerprint changed, bootstrap stops with `BOOTSTRAP_PROPOSAL_STALE`; correct or apply the draft deliberately, or use `/ai-bootstrap --force` to replace it. Approval applies to the draft files under `.ai/bootstrap-proposal/`; repository drift between proposal and persistence blocks the write.
 
 Every later workflow run stages its candidate artifacts under `.ai/runtime/<run-id>/`; concurrent OpenCode sessions must keep and pass their exact run IDs. Local mode excludes both runtime staging and canonical `.ai/runs/<run-id>/` evidence from application commits.

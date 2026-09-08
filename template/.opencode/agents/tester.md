@@ -4,6 +4,24 @@ mode: subagent
 color: "#a06cd5"
 steps: 30
 permissions:
+  - action: skill
+    resource: "*"
+    effect: deny
+  - action: skill
+    resource: "project-context"
+    effect: allow
+  - action: skill
+    resource: "quality-gate"
+    effect: allow
+  - action: skill
+    resource: "stack-*"
+    effect: allow
+  - action: skill
+    resource: "architecture-*"
+    effect: allow
+  - action: skill
+    resource: "project-*"
+    effect: allow
   - action: edit
     resource: "*"
     effect: deny

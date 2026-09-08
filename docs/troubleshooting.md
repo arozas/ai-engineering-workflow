@@ -36,6 +36,14 @@ If OpenCode says `Unknown tool 'workflow_bootstrap_prepare'`, current bootstrap 
 
 If `/ai-bootstrap` loads `project-context`, asks for a generic bootstrap input confirmation, explores source files by itself, or writes final `.ai/project.json` immediately after a short `yes`, the installed control plane is stale or inconsistent. Current bootstrap must call `workflow_bootstrap_prepare` or its fallback and write only draft files under `.ai/bootstrap-proposal/` before approval.
 
+If a second `/ai-bootstrap` appears ready to regenerate an unchanged proposal, stop it and update the installed workflow. Current behavior returns `BOOTSTRAP_PROPOSAL_CURRENT` and preserves edits. `BOOTSTRAP_PROPOSAL_STALE` requires a deliberate choice; use `/ai-bootstrap --force` only to replace the draft. Use `/ai-bootstrap-enhance` for one optional bounded semantic pass instead of asking the bootstrap command to explore repeatedly.
+
+## An agent repeats tools or appears stuck in a loop
+
+Use `/run-status <run-id>` once. Current agents call `workflow_next` once, take one legal action, and stop at approvals or terminal states. Repeating an unchanged state, gate, classifier, review, delegation, or search is a protocol violation. Do not keep prompting the same model to continue indefinitely: preserve the run ID and artifacts, then retry the role with a stronger model if needed.
+
+For bootstrap, inspect `.ai/bootstrap-proposal/approval.md` and `evidence.md`; for gates, inspect `.ai/runtime/<run-id>/gates.json`. The full evidence is persisted even though model-facing tool output is intentionally compact. Record duplicate calls, violations, and step-limit exhaustion in the benchmark rather than increasing every agent's step budget.
+
 If `/ai-bootstrap` repeats that the profile succeeded and that it must load `repo-bootstrap`, `project-profiler`, and `project-skill-builder`, the runtime/model is treating skill loading as narration instead of an action. Current bootstrap defines concrete file reads for those skills: `.opencode/skills/repo-bootstrap/SKILL.md`, `.opencode/skills/project-profiler/SKILL.md`, and `.opencode/skills/project-skill-builder/SKILL.md`. Update the installed workflow before retrying.
 
 If the proposal is too large for the chat or a provider returns HTTP 413, review `.ai/bootstrap-proposal/evidence.md` and edit the draft files directly. Do not rerun the whole bootstrap just to correct a proposal field. Run `/ai-bootstrap-apply` after the draft files are corrected.
@@ -171,7 +179,7 @@ The workflow uses the current Node 24-based checkout action. If a runtime deprec
 
 ## OpenCode smoke discovery fails
 
-Run `opencode2 --version`, then execute `scripts/smoke-opencode.ps1` locally. The test does not call a model; it verifies the local server health and discovery endpoints, including both reviewer-specific tools. The script is V2-only by default because this template uses OpenCode V2 permissions. If `opencode2` is missing from `PATH`, install the current V2 CLI or fix the terminal environment before retrying. Other failures usually mean the installed OpenCode version cannot parse `opencode.json`, one Markdown definition has invalid frontmatter, `.opencode/tools/workflow.ts` cannot load, or the current OpenCode V2 beta changed its headless API behavior. This smoke test is intentionally manual while V2 is beta so runtime drift does not invalidate deterministic workflow changes.
+Run `opencode2 --version`, then execute `scripts/smoke-opencode.ps1` locally. The test does not call a model; it verifies local server health and prefers runtime agent, command, and typed-tool discovery. Current V2 preview builds may return empty agent/command payloads or omit typed-tool discovery; the script then verifies installed Markdown definitions and TypeScript exports statically and names each fallback in the success message. A fallback is not proof of runtime registration, which is why this smoke remains manual and the deterministic validator/test suite is the required CI gate. The script is V2-only by default and safely launches Windows `.cmd` shims from paths containing spaces. If `opencode2` is missing from `PATH`, install the current V2 CLI or fix the terminal environment before retrying. Other failures usually mean the installed OpenCode version cannot parse `opencode.json` or the current preview changed its headless API behavior.
 
 Use `-AllowLegacyOpenCodeFallback` only for local compatibility investigation. The fallback may select the V1 `opencode` executable and is expected to reject this workflow's V2 permissions.
 

@@ -10,6 +10,24 @@ permissions:
   - action: workflow_state
     resource: "*"
     effect: allow
+  - action: workflow_next
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: "*"
+    effect: deny
+  - action: skill
+    resource: "workflow-state"
+    effect: allow
+  - action: skill
+    resource: "delivery-safety"
+    effect: allow
+  - action: skill
+    resource: "conventional-commit"
+    effect: allow
+  - action: skill
+    resource: "pr-description"
+    effect: allow
   - action: edit
     resource: "*"
     effect: deny

@@ -35,6 +35,11 @@ $records = @(
                 CostUsd = [double]$run.costUsd
                 DurationSeconds = [double]$run.durationSeconds
                 CorrectionCycles = [int]$run.correctionCycles
+                ToolCalls = if ($run.PSObject.Properties.Name -contains 'toolCalls') { [int]$run.toolCalls } else { 0 }
+                DuplicateToolCalls = if ($run.PSObject.Properties.Name -contains 'duplicateToolCalls') { [int]$run.duplicateToolCalls } else { 0 }
+                SubagentDelegations = if ($run.PSObject.Properties.Name -contains 'subagentDelegations') { [int]$run.subagentDelegations } else { 0 }
+                ProtocolViolations = if ($run.PSObject.Properties.Name -contains 'protocolViolations') { [int]$run.protocolViolations } else { 0 }
+                StepLimitReached = if ($run.PSObject.Properties.Name -contains 'stepLimitReached') { [bool]$run.stepLimitReached } else { $false }
                 Passed = [string]$run.result -eq 'PASS'
                 EscapedDefects = [int]$run.escapedDefects
             }
@@ -53,6 +58,11 @@ $summary = @(
             AverageCostUsd = [Math]::Round(($items.CostUsd | Measure-Object -Average).Average, 4)
             AverageDurationSeconds = [Math]::Round(($items.DurationSeconds | Measure-Object -Average).Average, 1)
             AverageCorrections = [Math]::Round(($items.CorrectionCycles | Measure-Object -Average).Average, 2)
+            AverageToolCalls = [Math]::Round(($items.ToolCalls | Measure-Object -Average).Average, 1)
+            AverageDelegations = [Math]::Round(($items.SubagentDelegations | Measure-Object -Average).Average, 1)
+            DuplicateToolCalls = ($items.DuplicateToolCalls | Measure-Object -Sum).Sum
+            ProtocolViolations = ($items.ProtocolViolations | Measure-Object -Sum).Sum
+            StepLimitRuns = @($items | Where-Object StepLimitReached).Count
             SuccessRatePercent = [Math]::Round((@($items | Where-Object Passed).Count / $items.Count) * 100, 1)
             EscapedDefects = ($items.EscapedDefects | Measure-Object -Sum).Sum
         }
@@ -64,11 +74,11 @@ $lines = @(
     '',
     "Runs: $($records.Count)",
     '',
-    '| Workflow path | Runs | Avg. tokens | Avg. cost USD | Avg. seconds | Avg. corrections | Success rate | Escaped defects |',
-    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
+    '| Workflow path | Runs | Avg. tokens | Avg. cost USD | Avg. seconds | Avg. corrections | Avg. tool calls | Avg. delegations | Duplicate calls | Protocol violations | Step-limit runs | Success rate | Escaped defects |',
+    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
 )
 foreach ($row in $summary) {
-    $lines += "| $($row.WorkflowPath) | $($row.Runs) | $($row.AverageTokens) | $($row.AverageCostUsd) | $($row.AverageDurationSeconds) | $($row.AverageCorrections) | $($row.SuccessRatePercent)% | $($row.EscapedDefects) |"
+    $lines += "| $($row.WorkflowPath) | $($row.Runs) | $($row.AverageTokens) | $($row.AverageCostUsd) | $($row.AverageDurationSeconds) | $($row.AverageCorrections) | $($row.AverageToolCalls) | $($row.AverageDelegations) | $($row.DuplicateToolCalls) | $($row.ProtocolViolations) | $($row.StepLimitRuns) | $($row.SuccessRatePercent)% | $($row.EscapedDefects) |"
 }
 
 $standard = $summary | Where-Object WorkflowPath -eq 'standard' | Select-Object -First 1

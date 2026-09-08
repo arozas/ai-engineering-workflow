@@ -75,9 +75,12 @@ foreach ($required in @(
     'template\.opencode\agents\quick-reviewer.md',
     'template\.opencode\agents\delivery.md',
     'template\.opencode\agents\diagnostician.md',
+    'template\.opencode\agents\bootstrap-enricher.md',
+    'template\.opencode\agents\evidence-reader.md',
     'template\.opencode\tools\workflow.ts',
     'template\.opencode\commands\ai-bootstrap.md',
     'template\.opencode\commands\ai-bootstrap-apply.md',
+    'template\.opencode\commands\ai-bootstrap-enhance.md',
     'template\.opencode\commands\quick-fix.md',
     'template\.opencode\commands\small-task.md',
     'template\.opencode\commands\ai-refresh.md',
@@ -157,6 +160,8 @@ $quickReviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot '
 $reviewerAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\reviewer.md') -Raw
 $orchestratorAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\orchestrator.md') -Raw
 $deliveryAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\delivery.md') -Raw
+$bootstrapEnricherAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\bootstrap-enricher.md') -Raw
+$evidenceReaderAgentContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\agents\evidence-reader.md') -Raw
 $rootAgentsContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\AGENTS.md') -Raw
 $bootstrapCommandContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\commands\ai-bootstrap.md') -Raw
 $projectContextSkillContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\skills\project-context\SKILL.md') -Raw
@@ -170,6 +175,29 @@ if ($quickFixAgentContent -notmatch '(?m)^steps:\s*16\s*$') {
 }
 if ($quickReviewerAgentContent -notmatch '(?m)^steps:\s*8\s*$') {
     $errors += 'quick-reviewer agent must keep its bounded 8-step budget.'
+}
+if ($bootstrapEnricherAgentContent -notmatch '(?m)^steps:\s*8\s*$' -or
+    $evidenceReaderAgentContent -notmatch '(?m)^steps:\s*8\s*$') {
+    $errors += 'Bootstrap enrichment and evidence reading must keep bounded 8-step budgets.'
+}
+foreach ($boundedReadOnlyAgent in @{
+    'bootstrap-enricher' = $bootstrapEnricherAgentContent
+    'evidence-reader' = $evidenceReaderAgentContent
+}.GetEnumerator()) {
+    if ($boundedReadOnlyAgent.Value -notmatch '(?ms)- action:\s*shell\s+resource:\s*"\*"\s+effect:\s*deny' -or
+        $boundedReadOnlyAgent.Value -notmatch '(?ms)- action:\s*subagent\s+resource:\s*"\*"\s+effect:\s*deny') {
+        $errors += "$($boundedReadOnlyAgent.Key) must deny shell and subagent access."
+    }
+}
+foreach ($enricherDeniedCapability in @('shell', 'grep', 'glob', 'list', 'webfetch', 'subagent')) {
+    if ($bootstrapEnricherAgentContent -notmatch ('(?ms)- action:\s*' + [regex]::Escape($enricherDeniedCapability) + '\s+resource:\s*"\*"\s+effect:\s*deny')) {
+        $errors += "bootstrap-enricher must deny $enricherDeniedCapability."
+    }
+}
+foreach ($evidenceReaderToken in @('steps: 8', 'six production files and four test files', 'never read the same file twice', 'must not send the same unchanged question again')) {
+    if ($evidenceReaderAgentContent -notmatch [regex]::Escape($evidenceReaderToken)) {
+        $errors += "evidence-reader is missing bounded exploration contract: $evidenceReaderToken."
+    }
 }
 foreach ($agentDefinition in @{
     'developer' = $developerAgentContent
@@ -207,7 +235,7 @@ if ($deliveryAgentContent -match $deliveryCommitEditPattern) {
     $errors += 'delivery must not author commit evidence directly; commit-approved.ps1 owns it.'
 }
 $typedToolContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.opencode\tools\workflow.ts') -Raw
-foreach ($toolExport in @('state', 'standard_review', 'quick_review', 'gate', 'fast_path', 'validate_project', 'profile_project', 'bootstrap_prepare', 'bootstrap_apply', 'validate_diagnosis', 'delivery_check')) {
+foreach ($toolExport in @('state', 'next', 'standard_review', 'quick_review', 'gate', 'fast_path', 'validate_project', 'profile_project', 'bootstrap_prepare', 'bootstrap_apply', 'validate_diagnosis', 'delivery_check')) {
     if ($typedToolContent -notmatch [regex]::Escape("export const $toolExport = tool")) {
         $errors += "Typed workflow tool is missing export: $toolExport."
     }
@@ -216,14 +244,23 @@ if ($typedToolContent -notmatch [regex]::Escape('Bun.spawn(["pwsh", "-NoProfile"
     $typedToolContent -match '(?m)Bun\.spawn\(`') {
     $errors += 'Typed workflow tools must invoke PowerShell with an argument vector, never an interpolated shell string.'
 }
+foreach ($compactToolToken in @('limit = 4_000', 'function nextActions', 'function compactState', 'function compactGate', 'do not rerun unchanged gates')) {
+    if ($typedToolContent -notmatch [regex]::Escape($compactToolToken)) {
+        $errors += "Typed workflow tools are missing compact execution contract: $compactToolToken."
+    }
+}
 foreach ($agentToolRequirement in @{
     'orchestrator workflow_state' = @($orchestratorAgentContent, 'workflow_state')
+    'orchestrator workflow_next' = @($orchestratorAgentContent, 'workflow_next')
     'orchestrator workflow_gate' = @($orchestratorAgentContent, 'workflow_gate')
     'orchestrator workflow_bootstrap_prepare' = @($orchestratorAgentContent, 'workflow_bootstrap_prepare')
     'orchestrator workflow_bootstrap_apply' = @($orchestratorAgentContent, 'workflow_bootstrap_apply')
     'developer workflow_gate' = @($developerAgentContent, 'workflow_gate')
     'quick-fix workflow_fast_path' = @($quickFixAgentContent, 'workflow_fast_path')
     'quick-fix workflow_state' = @($quickFixAgentContent, 'workflow_state')
+    'quick-fix workflow_next' = @($quickFixAgentContent, 'workflow_next')
+    'delivery workflow_next' = @($deliveryAgentContent, 'workflow_next')
+    'bootstrap-enricher workflow_bootstrap_apply' = @($bootstrapEnricherAgentContent, 'workflow_bootstrap_apply')
     'reviewer workflow_standard_review' = @($reviewerAgentContent, 'workflow_standard_review')
     'quick-reviewer workflow_quick_review' = @($quickReviewerAgentContent, 'workflow_quick_review')
 }.GetEnumerator()) {
@@ -241,7 +278,7 @@ if ($quickReviewerAgentContent -match '(?ms)- action:\s*(workflow_state|workflow
 }
 $qualityRunnerContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\run-quality-gates.ps1') -Raw
 $workflowStateContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\workflow-state.ps1') -Raw
-foreach ($requiredRunnerToken in @('quality-gates.schema.json', 'startedWorktreeFingerprint', 'runnerSha256', 'configuredCommandCount', 'qualityPlanSha256', 'workflow-run.schema.json', 'RunId')) {
+foreach ($requiredRunnerToken in @('quality-gates.schema.json', 'startedWorktreeFingerprint', 'runnerSha256', 'configuredCommandCount', 'qualityPlanSha256', 'workflow-run.schema.json', 'RunId', '[switch]$Force', 'Invalid or stale runtime evidence is replaced')) {
     if ($qualityRunnerContent -notmatch [regex]::Escape($requiredRunnerToken)) {
         $errors += "Quality-gate runner is missing deterministic evidence field or check: $requiredRunnerToken."
     }
@@ -290,7 +327,7 @@ foreach ($onboardingScript in @('scripts\install.ps1', 'scripts\new-project.ps1'
     }
 }
 $openCodeSmokeContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\smoke-opencode.ps1') -Raw
-foreach ($smokeToken in @('opencode2', 'AllowLegacyOpenCodeFallback', 'SelfTest', 'OpenCode smoke helper self-test passed', '/api/health', '/global/health', '/api/agent', '/api/command', '/api/experimental/tool/ids', 'directory=', 'Authorization', '<redacted>', 'workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_bootstrap_prepare', 'workflow_bootstrap_apply')) {
+foreach ($smokeToken in @('opencode2', 'AllowLegacyOpenCodeFallback', 'SelfTest', 'OpenCode smoke helper self-test passed', 'Get-WindowsCommandInvocation', 'Get-WorkflowToolNamesFromSource', 'Get-StaticMarkdownDefinitionNames', 'static definition fallback', 'static export fallback', '/api/health', '/global/health', '/api/agent', '/api/command', '/api/experimental/tool/ids', 'directory=', 'Authorization', '<redacted>', 'workflow_state', 'workflow_next', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_bootstrap_prepare', 'workflow_bootstrap_apply')) {
     if ($openCodeSmokeContent -notmatch [regex]::Escape($smokeToken)) {
         $errors += "OpenCode smoke test is missing discovery check: $smokeToken."
     }
@@ -331,7 +368,7 @@ if ($diagnosticianAgentContent -notmatch '(?ms)- action:\s*edit\s+resource:\s*"\
     $diagnosticianAgentContent -notmatch '(?ms)- action:\s*subagent\s+resource:\s*"\*"\s+effect:\s*deny') {
     $errors += 'diagnostician must deny all edit and subagent access.'
 }
-foreach ($bootstrapToken in @('workflow_bootstrap_prepare', 'prepare-bootstrap-proposal.ps1', 'BOOTSTRAP BLOCKED: PROFILE TOOL UNAVAILABLE', 'Do not read source files', '.ai/bootstrap-proposal/project.json', '/ai-bootstrap-apply')) {
+foreach ($bootstrapToken in @('workflow_bootstrap_prepare', 'prepare-bootstrap-proposal.ps1', 'BOOTSTRAP BLOCKED: PROFILE TOOL UNAVAILABLE', 'BOOTSTRAP_PROPOSAL_CURRENT', 'BOOTSTRAP_PROPOSAL_STALE', 'Do not read source files', '.ai/bootstrap-proposal/project.json', '.ai/bootstrap-proposal/evidence-packet.json', '/ai-bootstrap-apply', '/ai-bootstrap-enhance')) {
     if ($bootstrapCommandContent -notmatch [regex]::Escape($bootstrapToken)) {
         $errors += "ai-bootstrap command is missing bootstrap robustness contract: $bootstrapToken."
     }
@@ -344,6 +381,32 @@ foreach ($bootstrapPrecedenceToken in @('For `/ai-bootstrap`, do not load `proje
 foreach ($orchestratorBootstrapToken in @('For `/ai-bootstrap`, follow the command file before any normal planning behavior', 'run `workflow_bootstrap_prepare`', 'Do not read source files, list directories, load `project-context`, ask for bootstrap input', 'The preparer owns profiling, conservative inference', 'For `/ai-bootstrap-apply`, do not regenerate or reinterpret the proposal')) {
     if ($orchestratorAgentContent -notmatch [regex]::Escape($orchestratorBootstrapToken)) {
         $errors += "orchestrator is missing bootstrap precedence guard: $orchestratorBootstrapToken."
+    }
+}
+foreach ($smallModelContract in @('workflow_next', 'Do not repeat an unchanged state, profile, gate, review, or exploration call', 'evidence-reader')) {
+    if ($orchestratorAgentContent -notmatch [regex]::Escape($smallModelContract)) {
+        $errors += "orchestrator is missing bounded-execution guidance: $smallModelContract."
+    }
+}
+foreach ($nextAwareCommand in @('run-status', 'implement', 'test', 'review', 'delivery-check')) {
+    $nextAwareContent = Get-Content -LiteralPath (Join-Path $workflowRoot "template\.opencode\commands\$nextAwareCommand.md") -Raw
+    if ($nextAwareContent -notmatch [regex]::Escape('workflow_next') -or $nextAwareContent -notmatch [regex]::Escape('once')) {
+        $errors += "$nextAwareCommand must use workflow_next exactly once at its resume boundary."
+    }
+}
+foreach ($skillScopedAgent in @{
+    'orchestrator' = $orchestratorAgentContent
+    'developer' = $developerAgentContent
+    'reviewer' = $reviewerAgentContent
+    'quick-fix' = $quickFixAgentContent
+    'quick-reviewer' = $quickReviewerAgentContent
+    'delivery' = $deliveryAgentContent
+    'diagnostician' = $diagnosticianAgentContent
+    'bootstrap-enricher' = $bootstrapEnricherAgentContent
+    'evidence-reader' = $evidenceReaderAgentContent
+}.GetEnumerator()) {
+    if ($skillScopedAgent.Value -notmatch '(?ms)- action:\s*skill\s+resource:\s*"\*"\s+effect:\s*deny') {
+        $errors += "$($skillScopedAgent.Key) must deny the global skill catalog before reopening a bounded allowlist."
     }
 }
 foreach ($projectContextBootstrapToken in @('If the current task is `/ai-bootstrap`, stop using this skill', 'Project context is not trusted until bootstrap is approved and persisted', 'do not inspect files, ask for bootstrap input, or create project configuration from this skill')) {
@@ -370,6 +433,12 @@ if ($cleanArchitectureSkillContent -notmatch [regex]::Escape('Do not apply this 
 if ($simpleLayeredSkillContent -notmatch [regex]::Escape('controller/model/repository') -or
     $simpleLayeredSkillContent -notmatch [regex]::Escape('do not add layers')) {
     $errors += 'architecture-simple-layered skill must describe pragmatic layered boundaries and avoid architecture inflation.'
+}
+$benchmarkSchemaContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'evaluations\benchmark.schema.json') -Raw
+foreach ($benchmarkMetric in @('toolCalls', 'duplicateToolCalls', 'subagentDelegations', 'protocolViolations', 'stepLimitReached')) {
+    if ($benchmarkSchemaContent -notmatch [regex]::Escape('"' + $benchmarkMetric + '"')) {
+        $errors += "Benchmark schema is missing small-model loop metric: $benchmarkMetric."
+    }
 }
 foreach ($commandName in @('quick-fix', 'small-task')) {
     $commandContent = Get-Content -LiteralPath (Join-Path $workflowRoot "template\.opencode\commands\$commandName.md") -Raw

@@ -51,6 +51,11 @@
         "costUsd": { "type": "number", "minimum": 0 },
         "durationSeconds": { "type": "number", "minimum": 0 },
         "correctionCycles": { "type": "integer", "minimum": 0 },
+        "toolCalls": { "type": "integer", "minimum": 0 },
+        "duplicateToolCalls": { "type": "integer", "minimum": 0 },
+        "subagentDelegations": { "type": "integer", "minimum": 0 },
+        "protocolViolations": { "type": "integer", "minimum": 0 },
+        "stepLimitReached": { "type": "boolean" },
         "result": { "enum": ["PASS", "FAIL"] },
         "escapedDefects": { "type": "integer", "minimum": 0 },
         "notes": { "type": "string", "maxLength": 2000 }

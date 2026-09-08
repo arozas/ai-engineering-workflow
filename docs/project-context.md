@@ -19,6 +19,8 @@ Installation remains deterministic and model-independent. Personalization is a s
 
 During proposal the final profile is not written. `/ai-bootstrap` delegates draft creation to the deterministic `workflow_bootstrap_prepare` tool, backed by `.ai/scripts/prepare-bootstrap-proposal.ps1`. The preparer profiles the repository, applies conservative inference rules, writes `.ai/bootstrap-proposal/`, and validates the draft as a dry run.
 
+The preparer is idempotent. When an existing valid draft has the same structural fingerprint it returns `BOOTSTRAP_PROPOSAL_CURRENT` and does not rewrite user edits. Structural drift returns `BOOTSTRAP_PROPOSAL_STALE`. Only an explicit `/ai-bootstrap --force` replaces the draft.
+
 If OpenCode does not expose `workflow_bootstrap_prepare`, bootstrap may use exactly one controlled fallback: `pwsh -NoProfile -File .ai/scripts/prepare-bootstrap-proposal.ps1`. The fallback owns profiling and draft generation. It is not permission to browse the repository manually.
 
 Empty repositories stop with `NO PROJECT MODULES DETECTED`. The distribution repository stops with `BOOTSTRAP NOT APPLICABLE`. Bootstrap never invents a module to satisfy the schema.
@@ -33,6 +35,7 @@ Before approval, bootstrap writes a durable draft proposal under `.ai/bootstrap-
 ├── project.json
 ├── project-rules.md
 ├── generated-skills.json
+├── evidence-packet.json
 ├── evidence.md
 ├── approval.md
 └── skills/
@@ -40,19 +43,18 @@ Before approval, bootstrap writes a durable draft proposal under `.ai/bootstrap-
         └── SKILL.md
 ```
 
-The draft `project.json` uses final installed paths such as `.ai/project-profile.json`, `.ai/generated-skills.json`, and `.opencode/skills/project-<module-id>/SKILL.md`. `evidence.md` contains the detailed review material:
+The draft `project.json` uses final installed paths such as `.ai/project-profile.json`, `.ai/generated-skills.json`, and `.opencode/skills/project-<module-id>/SKILL.md`. Deterministic inference is deliberately conservative:
 
-1. Repository shape and modules.
-2. Technology and architecture per module with confidence and exact evidence.
-3. Exact quality commands and the source proving each command.
-4. Context skills selected for each module.
-5. Risks, unknowns, and questions.
-6. Rationale for `.ai/project.json`.
-7. Proposed `.ai/project-rules.md` contents.
-8. Rationale for `.ai/generated-skills.json`.
-9. Complete content rationale for every proposed `project-<module-id>` skill.
-10. Exploration ledger and structural fingerprint.
-11. A bounded diagnostics policy.
+1. Languages are derived independently for each module from all Git-visible files in that module.
+2. Test commands require actual test files or a test project identified from project content, never from an application filename containing `Test`.
+3. `dotnet format` requires an established repository or CI command; `.editorconfig` alone is insufficient.
+4. Node package-manager commands follow lockfiles and declared package scripts.
+5. Unsupported stacks remain explicit and do not create dangling generated-skill references.
+6. Timestamps are emitted and checked as RFC 3339 independently of machine culture.
+
+`evidence.md` records the structural profile, module inference, declared bootstrap intent, risks, and review instructions. `evidence-packet.json` lists at most three representative production and three representative test files per module. It is the complete exploration boundary for optional enrichment.
+
+Run `/ai-bootstrap-enhance` only when a stronger model should refine project-specific rules from representative source. The `bootstrap-enricher` reads each listed file at most once, cannot use shell, search, web, or subagents, cannot change deterministic modules, quality commands, or fingerprints, and may perform only one correction after dry-run validation. Large models retain room for useful semantic refinement without making the default small-model path open-ended.
 
 Arrays remain empty when evidence does not establish a command or technology. Confidence communicates evidence strength; it does not turn a weak inference into a rule.
 
@@ -125,7 +127,7 @@ They load only for affected configured modules. Architecture labels require evid
 
 Run `/ai-refresh` after structural changes: a new module/workspace, framework migration, new architecture boundary, replaced build/test tooling, changed CI commands, or moved manifests/source roots.
 
-Refresh compares a read-only profile with the persisted one and proposes only necessary changes. Ordinary source growth inside known structure does not require regeneration. Approved refreshes use the same drift and validation gates as bootstrap.
+Refresh compares one read-only profile with the persisted one. If unchanged it stops. On structural drift it uses the deterministic forced preparer to replace only the draft proposal, after which the same optional enrichment and explicit apply steps are available. Ordinary source growth inside known structure does not require regeneration.
 
 ## Azure DevOps work items
 

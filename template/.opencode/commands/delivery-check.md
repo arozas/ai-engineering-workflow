@@ -3,7 +3,7 @@ description: Assess whether the approved change is ready for commit, push, or dr
 agent: orchestrator
 ---
 
-Load `workflow-state` and `delivery-safety`. Require a validated persisted run in `READY_FOR_DELIVERY`, then delegate a read-only delivery inspection to `delivery` using `workflow_delivery_check`.
+Load `workflow-state` and `delivery-safety`. Call `workflow_next` once, require `READY_FOR_DELIVERY`, then delegate one read-only delivery inspection to `delivery` using `workflow_delivery_check`.
 
 Combine Git state with the persisted approved plan, artifact hashes, deterministic gate evidence, independent review verdict, recorded worktree fingerprint, diff budget, and unresolved findings. Report `READY FOR DELIVERY` only when every required precondition is present and current; otherwise report `DELIVERY NOT READY` with exact blockers.
 

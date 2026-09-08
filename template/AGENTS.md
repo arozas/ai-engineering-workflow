@@ -2,9 +2,11 @@
 
 This repository uses a stack-agnostic, human-gated engineering workflow. Treat `.ai/project.json` as the machine-readable source of project modules and quality commands after bootstrap. Treat `.ai/project-rules.md` as the highest-authority project guidance.
 
-For `/ai-bootstrap`, do not load `project-context` first. Bootstrap has no trusted project context yet and must follow `.opencode/commands/ai-bootstrap.md`: run `workflow_bootstrap_prepare` or its documented `prepare-bootstrap-proposal.ps1` fallback, then summarize the generated `.ai/bootstrap-proposal/` draft. Do not manually explore the repository during bootstrap. `/ai-bootstrap-apply` validates and applies the approved draft.
+For `/ai-bootstrap`, do not load `project-context` first. Bootstrap has no trusted project context yet and must follow `.opencode/commands/ai-bootstrap.md`: run `workflow_bootstrap_prepare` once or its documented `prepare-bootstrap-proposal.ps1` fallback, then summarize the generated `.ai/bootstrap-proposal/` draft. Do not manually explore the repository during bootstrap. Never overwrite an existing draft unless the user explicitly runs `/ai-bootstrap --force`. `/ai-bootstrap-enhance` optionally gives a stronger model one bounded representative-file pass. `/ai-bootstrap-apply` validates and applies the approved draft.
 
 At the start of ticket analysis, implementation, review, testing, or any non-bootstrap workflow task, load `project-context`. It must read `.ai/project-rules.md` and the applicable module configuration before work continues. If `.ai/project.json` does not exist yet, stop and tell the user to run `/ai-bootstrap`; do not guess, infer, or write project configuration from ad hoc exploration. Use `/ai-refresh` when the persisted repository profile reports structural drift; never regenerate project skills inside a delivery task.
+
+For an existing run, call `workflow_next` once and perform one returned legal action. Do not repeat unchanged state, profile, gate, classifier, review, delegation, or search operations. Stop at the next approval, blocker, escalation, or terminal state.
 
 ## Unknown production failures
 

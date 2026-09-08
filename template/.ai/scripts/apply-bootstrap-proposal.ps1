@@ -66,6 +66,14 @@ function Test-JsonFile {
     }
 }
 
+function Test-Rfc3339Timestamp($Value) {
+    if ($Value -is [DateTime]) { $Value = $Value.ToString('o') }
+    else { $Value = [string]$Value }
+    if ($Value -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$') { return $false }
+    $parsed = [DateTimeOffset]::MinValue
+    return [DateTimeOffset]::TryParse($Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$parsed)
+}
+
 $resolvedProposalRoot = Resolve-RepositoryPath -Path $ProposalRoot -Description 'Bootstrap proposal directory' -RequireDirectory
 $proposalRelativeRoot = [IO.Path]::GetRelativePath($repositoryRoot, $resolvedProposalRoot).Replace('\', '/')
 if ($proposalRelativeRoot -ne '.ai/bootstrap-proposal') {
@@ -91,6 +99,17 @@ $project = Get-Content -LiteralPath $proposalProjectPath -Raw | ConvertFrom-Json
 $generatedSkills = Get-Content -LiteralPath $proposalGeneratedSkillsPath -Raw | ConvertFrom-Json
 $proposalProfile = Get-Content -LiteralPath $proposalProfilePath -Raw | ConvertFrom-Json
 $errors = @()
+
+$projectAnalyzedAt = if ($project.PSObject.Properties.Name -contains 'profile') { $project.profile.analyzedAtUtc } else { '' }
+foreach ($timestamp in @(
+    [pscustomobject]@{ Name = 'project.profile.analyzedAtUtc'; Value = $projectAnalyzedAt },
+    [pscustomobject]@{ Name = 'generated-skills.generatedAtUtc'; Value = $generatedSkills.generatedAtUtc },
+    [pscustomobject]@{ Name = 'project-profile.scannedAtUtc'; Value = $proposalProfile.scannedAtUtc }
+)) {
+    if (-not (Test-Rfc3339Timestamp -Value $timestamp.Value)) {
+        $errors += "$($timestamp.Name) must be an RFC 3339 timestamp."
+    }
+}
 
 if (-not ($project.PSObject.Properties.Name -contains 'profile')) {
     $errors += 'Proposed project configuration must include a profile block.'

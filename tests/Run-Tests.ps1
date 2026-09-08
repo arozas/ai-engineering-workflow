@@ -60,7 +60,7 @@ try {
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-Mode', 'Local') | Out-Null
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local installation remains invisible to Git.'
     $metadata = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\workflow-installation.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($metadata.workflowVersion -eq '1.10.0') -Message 'Installed metadata records version 1.10.0.'
+    Assert-True -Condition ($metadata.workflowVersion -eq '1.11.0') -Message 'Installed metadata records version 1.11.0.'
 
     $profileScript = Join-Path $repositoryRoot '.ai\scripts\profile-project.ps1'
     $profileOutput = Invoke-PowerShell -ScriptPath $profileScript -Arguments @('-OutputPath', '.ai/project-profile.json') -WorkingDirectory $repositoryRoot
@@ -70,9 +70,58 @@ try {
     Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $sourceRoot 'forbidden-profile.json'))) -Message 'The profiler cannot use its approved output option to overwrite application paths.'
 
     $bootstrapPrepareScript = Join-Path $repositoryRoot '.ai\scripts\prepare-bootstrap-proposal.ps1'
+    [ordered]@{
+        version = 1
+        projectName = 'declared-workflow-test'
+        projectPreset = 'empty'
+        requestedStacks = @('node')
+        requestedArchitectures = @()
+        createdAtUtc = [DateTime]::UtcNow.ToString('o')
+    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\bootstrap-input.json') -Encoding utf8
     $preparedBootstrap = Invoke-PowerShell -ScriptPath $bootstrapPrepareScript -Arguments @() -WorkingDirectory $repositoryRoot
     Assert-True -Condition (($preparedBootstrap -join "`n") -match 'BOOTSTRAP_PROPOSAL_READY' -and (Test-Path -LiteralPath (Join-Path $repositoryRoot '.ai\bootstrap-proposal\evidence.md'))) -Message 'Bootstrap preparer creates a durable validated proposal without model-driven exploration.'
     Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot '.ai\project.json'))) -Message 'Bootstrap preparer does not write final project context before approval.'
+
+    $generatedBootstrapProjectJson = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\bootstrap-proposal\project.json') -Raw
+    $generatedBootstrapProject = $generatedBootstrapProjectJson | ConvertFrom-Json
+    $generatedBootstrapPacket = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\bootstrap-proposal\evidence-packet.json') -Raw | ConvertFrom-Json
+    $generatedBootstrapEvidence = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\bootstrap-proposal\evidence.md') -Raw
+    $generatedBootstrapRules = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\bootstrap-proposal\project-rules.md') -Raw
+    Assert-True -Condition ($generatedBootstrapProject.name -eq 'declared-workflow-test' -and $generatedBootstrapProject.modules[0].languages -contains 'javascript' -and $generatedBootstrapProject.modules[0].contextSkills -contains 'stack-node') -Message 'Bootstrap applies declared naming while deriving stack facts from repository evidence.'
+    Assert-True -Condition (@($generatedBootstrapProject.modules[0].quality.restore).Count -eq 0 -and @($generatedBootstrapProject.modules[0].quality.build).Count -eq 0 -and @($generatedBootstrapProject.modules[0].quality.test).Count -eq 0) -Message 'Bootstrap does not invent Node package-manager, build, or test commands without scripts, lockfiles, and test evidence.'
+    Assert-True -Condition ($generatedBootstrapProjectJson -match '"analyzedAtUtc"\s*:\s*"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})"') -Message 'Bootstrap emits an RFC 3339 profile timestamp independent of the machine culture.'
+    Assert-True -Condition ($generatedBootstrapPacket.maximumFilesToReadPerModule -eq 6 -and $generatedBootstrapPacket.modules[0].representativeSourceFiles -contains 'src/app/app.js') -Message 'Bootstrap emits a bounded representative evidence packet for optional enrichment.'
+    Assert-True -Condition ($generatedBootstrapEvidence -match 'Requested stacks: node' -and $generatedBootstrapEvidence -notmatch '\$moduleId|\$\(@\{' -and $generatedBootstrapRules.IndexOf([char]7) -lt 0) -Message 'Generated Markdown preserves declared intent and contains no PowerShell interpolation artifacts.'
+
+    Add-Content -LiteralPath (Join-Path $repositoryRoot '.ai\bootstrap-proposal\approval.md') -Value 'LOCAL-DRAFT-MARKER'
+    $currentBootstrap = Invoke-PowerShell -ScriptPath $bootstrapPrepareScript -Arguments @() -WorkingDirectory $repositoryRoot
+    Assert-True -Condition (($currentBootstrap -join "`n") -match 'BOOTSTRAP_PROPOSAL_CURRENT' -and (Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\bootstrap-proposal\approval.md') -Raw) -match 'LOCAL-DRAFT-MARKER') -Message 'Repeated bootstrap preserves a current user-edited draft instead of regenerating it.'
+    $forcedBootstrap = Invoke-PowerShell -ScriptPath $bootstrapPrepareScript -Arguments @('-Force') -WorkingDirectory $repositoryRoot
+    Assert-True -Condition (($forcedBootstrap -join "`n") -match 'BOOTSTRAP_PROPOSAL_READY' -and (Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\bootstrap-proposal\approval.md') -Raw) -notmatch 'LOCAL-DRAFT-MARKER') -Message 'Explicit force replaces an existing bootstrap draft once.'
+
+    $multiRoot = Join-Path $testRoot 'multi-stack-consumer'
+    New-Item -ItemType Directory -Path (Join-Path $multiRoot 'backend\Controllers'), (Join-Path $multiRoot 'backend\Models'), (Join-Path $multiRoot 'backend\Repository'), (Join-Path $multiRoot 'frontend\src') -Force | Out-Null
+    & git -C $multiRoot init -b main | Out-Null
+    & git -C $multiRoot config user.email 'workflow-tests@example.invalid'
+    & git -C $multiRoot config user.name 'Workflow Tests'
+    Set-Content -LiteralPath (Join-Path $multiRoot 'backend\ClientsApiTest.csproj') -Value '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $multiRoot 'backend\Controllers\ClientController.cs') -Value 'public sealed class ClientController {}' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $multiRoot 'backend\Models\Client.cs') -Value 'public sealed class Client {}' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $multiRoot 'backend\Repository\ClientRepository.cs') -Value 'public sealed class ClientRepository {}' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $multiRoot 'frontend\package.json') -Value '{"name":"frontend","scripts":{"build":"vite build","lint":"eslint .","test":"vitest run"}}' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $multiRoot 'frontend\package-lock.json') -Value '{"name":"frontend","lockfileVersion":3,"packages":{}}' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $multiRoot 'frontend\src\app.js') -Value 'export const app = true;' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $multiRoot '.editorconfig') -Value 'root = true' -Encoding utf8
+    & git -C $multiRoot add --all
+    & git -C $multiRoot commit -m 'test: create multi-stack fixture' | Out-Null
+    Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $multiRoot, '-Mode', 'Local') | Out-Null
+    $multiPrepare = Invoke-PowerShell -ScriptPath (Join-Path $multiRoot '.ai\scripts\prepare-bootstrap-proposal.ps1') -Arguments @() -WorkingDirectory $multiRoot
+    $multiProject = Get-Content -LiteralPath (Join-Path $multiRoot '.ai\bootstrap-proposal\project.json') -Raw | ConvertFrom-Json
+    $backendModule = $multiProject.modules | Where-Object id -eq 'backend' | Select-Object -First 1
+    $frontendModule = $multiProject.modules | Where-Object id -eq 'frontend' | Select-Object -First 1
+    Assert-True -Condition (($multiPrepare -join "`n") -match 'BOOTSTRAP_PROPOSAL_READY' -and @($backendModule.languages).Count -eq 1 -and $backendModule.languages[0] -eq 'csharp' -and @($frontendModule.languages).Count -eq 1 -and $frontendModule.languages[0] -eq 'javascript') -Message 'Bootstrap derives languages per module instead of reusing global language samples.'
+    Assert-True -Condition (@($backendModule.quality.test).Count -eq 0 -and @($backendModule.quality.lint).Count -eq 0 -and $backendModule.architectures -contains 'architecture-simple-layered') -Message 'An application project named ClientsApiTest is not mistaken for a test project, and editorconfig alone does not establish dotnet format.'
+    Assert-True -Condition ($frontendModule.quality.restore[0] -eq 'npm ci' -and $frontendModule.quality.build[0] -eq 'npm run build' -and $frontendModule.quality.lint[0] -eq 'npm run lint' -and @($frontendModule.quality.test).Count -eq 0) -Message 'Node quality commands follow lockfile and scripts while test stays empty without test evidence.'
 
     $bootstrapProposalRoot = Join-Path $repositoryRoot '.ai\bootstrap-proposal'
     New-Item -ItemType Directory -Path $bootstrapProposalRoot -Force | Out-Null
@@ -191,6 +240,9 @@ Applies to `src/app`.
     Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $passingGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
     $gateEvidence = Get-Content -LiteralPath (Get-RunRuntimePath $passingGateRunId 'gates.json') -Raw | ConvertFrom-Json
     Assert-True -Condition ($gateEvidence.runId -eq $passingGateRunId -and $gateEvidence.overall -eq 'PASS' -and $gateEvidence.modules[0].phases[4].commands[0].exitCode -eq 0 -and $gateEvidence.worktreeStable) -Message 'The deterministic gate runner derives PASS from the persisted run matrix and stable worktree fingerprints.'
+    $gateEvidenceHash = (Get-FileHash -LiteralPath (Get-RunRuntimePath $passingGateRunId 'gates.json') -Algorithm SHA256).Hash
+    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $passingGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
+    Assert-True -Condition ((Get-FileHash -LiteralPath (Get-RunRuntimePath $passingGateRunId 'gates.json') -Algorithm SHA256).Hash -eq $gateEvidenceHash) -Message 'An unchanged deterministic gate request reuses current evidence rather than rerunning commands.'
 
     $project.modules[0].quality.test = @('pwsh -NoProfile -Command "exit 7"')
     $project | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $repositoryRoot '.ai\project.json') -Encoding utf8
@@ -587,7 +639,7 @@ exit 0
     $installedProjectSkillBuilder = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\project-skill-builder\SKILL.md') -Raw
     $installedSimpleLayeredArchitecture = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\architecture-simple-layered\SKILL.md') -Raw
     Assert-True -Condition ($installedOpenCode -notmatch 'run-quality-gates\.ps1 \*.*allow' -and $installedOpenCode -match '"action": "workflow_\*".*"effect": "deny"') -Message 'Managed scripts are not exposed through automatically allowed shell wildcards.'
-    Assert-True -Condition ($workflowTools -match 'Bun\.spawn\(\["pwsh"' -and $workflowTools -match 'export const gate = tool' -and $workflowTools -match 'export const state = tool' -and $workflowTools -match 'export const bootstrap_prepare = tool' -and $workflowTools -match 'export const bootstrap_apply = tool') -Message 'Typed workflow tools pass validated arguments without shell-string interpolation.'
+    Assert-True -Condition ($workflowTools -match 'Bun\.spawn\(\["pwsh"' -and $workflowTools -match 'export const gate = tool' -and $workflowTools -match 'export const state = tool' -and $workflowTools -match 'export const next = tool' -and $workflowTools -match 'export const bootstrap_prepare = tool' -and $workflowTools -match 'export const bootstrap_apply = tool' -and $workflowTools -match 'limit = 4_000') -Message 'Typed workflow tools pass validated arguments and return bounded state, gate, and fallback output.'
     Assert-True -Condition ($installedAgents -match 'For `/ai-bootstrap`, do not load `project-context` first' -and $installedOrchestrator -match 'run `workflow_bootstrap_prepare`' -and $installedOrchestrator -match 'Do not read source files, list directories, load `project-context`, ask for bootstrap input') -Message 'Bootstrap precedence prevents AGENTS/orchestrator guidance from bypassing the deterministic preparer.'
     Assert-True -Condition ($installedProjectContextSkill -match 'If the current task is `/ai-bootstrap`, stop using this skill' -and $installedProjectContextSkill -match 'do not inspect files, ask for bootstrap input, or create project configuration from this skill') -Message 'project-context cannot bootstrap a missing project from ad hoc exploration.'
     Assert-True -Condition ($installedBootstrapCommand -match 'workflow_bootstrap_prepare' -and $installedBootstrapCommand -match 'prepare-bootstrap-proposal\.ps1' -and $installedBootstrapCommand -match 'Do not read source files' -and $installedBootstrapCommand -match '\.ai/bootstrap-proposal/project\.json') -Message 'Bootstrap command delegates proposal creation to the deterministic preparer.'
@@ -605,16 +657,17 @@ exit 0
             category = 'bugfix'
             description = 'Fixture benchmark'
             runs = @(
-                [ordered]@{ workflowPath = 'standard'; modelProfile = 'test'; inputTokens = 800; outputTokens = 200; costUsd = 1; durationSeconds = 20; correctionCycles = 1; result = 'PASS'; escapedDefects = 0 },
-                [ordered]@{ workflowPath = 'fast-path'; modelProfile = 'test'; inputTokens = 400; outputTokens = 100; costUsd = 0.5; durationSeconds = 10; correctionCycles = 0; result = 'PASS'; escapedDefects = 0 }
+                [ordered]@{ workflowPath = 'standard'; modelProfile = 'test'; inputTokens = 800; outputTokens = 200; costUsd = 1; durationSeconds = 20; correctionCycles = 1; toolCalls = 12; duplicateToolCalls = 2; subagentDelegations = 3; protocolViolations = 1; stepLimitReached = $false; result = 'PASS'; escapedDefects = 0 },
+                [ordered]@{ workflowPath = 'fast-path'; modelProfile = 'test'; inputTokens = 400; outputTokens = 100; costUsd = 0.5; durationSeconds = 10; correctionCycles = 0; toolCalls = 5; duplicateToolCalls = 0; subagentDelegations = 1; protocolViolations = 0; stepLimitReached = $false; result = 'PASS'; escapedDefects = 0 }
             )
         })
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $benchmarkPath -Encoding utf8
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\summarize-evaluations.ps1') -Arguments @('-InputPath', $benchmarkPath, '-OutputPath', $benchmarkSummaryPath) | Out-Null
-    Assert-True -Condition ((Get-Content -LiteralPath $benchmarkSummaryPath -Raw) -match '50% savings') -Message 'Benchmark tooling validates and compares recorded token usage.'
+    $benchmarkSummary = Get-Content -LiteralPath $benchmarkSummaryPath -Raw
+    Assert-True -Condition ($benchmarkSummary -match '50% savings' -and $benchmarkSummary -match 'Duplicate calls' -and $benchmarkSummary -match 'Protocol violations') -Message 'Benchmark tooling compares token usage and loop indicators.'
 
     $smokeSelfTestOutput = Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\smoke-opencode.ps1') -Arguments @('-SelfTest')
-    Assert-True -Condition (($smokeSelfTestOutput -join "`n") -match 'OpenCode smoke helper self-test passed: 4 assertions\.') -Message 'OpenCode smoke helper parsers are covered without starting the beta runtime.'
+    Assert-True -Condition (($smokeSelfTestOutput -join "`n") -match 'OpenCode smoke helper self-test passed: 6 assertions\.') -Message 'OpenCode smoke helper parsers, Windows shim quoting, and typed-tool fallback are covered without starting the beta runtime.'
 
     Add-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\developer.md') -Value "`nlocal customization"
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\update.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-DryRun') -ExpectedExitCode 1 | Out-Null

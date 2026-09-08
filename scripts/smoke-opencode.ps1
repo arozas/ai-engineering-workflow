@@ -70,6 +70,38 @@ function Assert-SmokeSelfTest {
     $script:selfTestPassed++
 }
 
+function Get-WindowsCommandInvocation {
+    param(
+        [Parameter(Mandatory = $true)][string]$CommandSource,
+        [Parameter(Mandatory = $true)][string[]]$CommandArguments
+    )
+
+    return ('""{0}" {1}"' -f $CommandSource, ($CommandArguments -join ' '))
+}
+
+function Get-WorkflowToolNamesFromSource {
+    param([Parameter(Mandatory = $true)][string]$Source)
+
+    return @(
+        [regex]::Matches($Source, '(?m)^export\s+const\s+([a-z_]+)\s*=\s*tool\s*\(') |
+            ForEach-Object { 'workflow_' + $_.Groups[1].Value } |
+            Sort-Object -Unique
+    )
+}
+
+function Get-StaticMarkdownDefinitionNames {
+    param([Parameter(Mandatory = $true)][string]$RootPath)
+
+    if (-not (Test-Path -LiteralPath $RootPath -PathType Container)) { return @() }
+    return @(
+        Get-ChildItem -LiteralPath $RootPath -Recurse -File -Filter '*.md' |
+            ForEach-Object {
+                ([IO.Path]::GetRelativePath($RootPath, $_.FullName) -replace '\.md$', '').Replace('\', '/')
+            } |
+            Sort-Object -Unique
+    )
+}
+
 function Invoke-SmokeSelfTest {
     $script:selfTestPassed = 0
 
@@ -88,6 +120,10 @@ function Invoke-SmokeSelfTest {
 
     Assert-SmokeSelfTest -Condition ((Format-DiscoveredNames -Names @()) -eq '<none>') -Message 'Empty discovery lists render explicitly.'
     Assert-SmokeSelfTest -Condition ((Format-DiscoveredNames -Names @('b', '', 'a')) -eq 'b, a') -Message 'Discovery formatting removes empty values without inventing names.'
+    $cmdInvocation = Get-WindowsCommandInvocation -CommandSource 'C:\Users\Test User\opencode2.cmd' -CommandArguments @('serve', '--port', '1234')
+    Assert-SmokeSelfTest -Condition ($cmdInvocation -eq '""C:\Users\Test User\opencode2.cmd" serve --port 1234"') -Message 'CMD invocation preserves a shim path containing spaces after /s quote processing.'
+    $sourceNames = @(Get-WorkflowToolNamesFromSource -Source "export const state = tool({})`nexport const next = tool({})")
+    Assert-SmokeSelfTest -Condition ($sourceNames.Count -eq 2 -and $sourceNames -contains 'workflow_state' -and $sourceNames -contains 'workflow_next') -Message 'Static typed-tool fallback extracts only exported workflow tools.'
 
     Write-Host "OpenCode smoke helper self-test passed: $script:selfTestPassed assertions."
 }
@@ -110,7 +146,17 @@ function Get-DefinitionNames {
     foreach ($definition in @($Definitions)) {
         if ($null -eq $definition) { continue }
         if ($definition -is [string]) {
-            $names.Add([string]$definition)
+            $text = ([string]$definition).Trim()
+            if (($text.StartsWith('{') -and $text.EndsWith('}')) -or ($text.StartsWith('[') -and $text.EndsWith(']'))) {
+                try {
+                    foreach ($nestedName in @(Get-DefinitionNames -Definitions ($text | ConvertFrom-Json))) { $names.Add($nestedName) }
+                    continue
+                }
+                catch {
+                    # Treat a non-JSON string as a literal discovered identifier.
+                }
+            }
+            $names.Add($text)
             continue
         }
 
@@ -210,7 +256,11 @@ function Invoke-OpenCodeEndpoint {
                 $separator = if ($path.Contains('?')) { '&' } else { '?' }
                 $uri = "$uri${separator}directory=$([uri]::EscapeDataString($Directory))"
             }
-            return Invoke-RestMethod -Uri $uri -Headers (Get-OpenCodeRequestHeaders) -TimeoutSec 10
+            $response = Invoke-RestMethod -Uri $uri -Headers (Get-OpenCodeRequestHeaders) -TimeoutSec 10
+            if ($response -is [string] -and ([string]$response).TrimStart().StartsWith('<!doctype html', [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Endpoint returned the web application instead of API data.'
+            }
+            return $response
         }
         catch {
             $errors += Hide-OpenCodeServerPassword -Value "${path}: $($_.Exception.Message)"
@@ -228,6 +278,20 @@ function Format-DiscoveredNames {
     return ($nameList | Select-Object -First 30) -join ', '
 }
 
+function Format-DiscoveryShape {
+    param([AllowNull()][object]$Payload)
+
+    if ($null -eq $Payload) { return 'null' }
+    if ($Payload -is [string]) { return "string(length=$(([string]$Payload).Length))" }
+    if ($Payload -is [System.Collections.IDictionary]) {
+        return "dictionary(keys=$(@($Payload.Keys) -join ','))"
+    }
+    $properties = @($Payload.PSObject.Properties.Name)
+    $dataProperty = $Payload.PSObject.Properties | Where-Object Name -eq 'data' | Select-Object -First 1
+    $dataShape = if ($null -eq $dataProperty -or $null -eq $dataProperty.Value) { 'none' } else { "type=$($dataProperty.Value.GetType().Name),count=$(@($dataProperty.Value).Count)" }
+    return "type=$($Payload.GetType().Name);properties=$($properties -join ',');data=$dataShape"
+}
+
 function Start-OpenCodeServer {
     param(
         [Parameter(Mandatory = $true)][string]$CommandSource,
@@ -243,11 +307,11 @@ function Start-OpenCodeServer {
     switch ($extension) {
         '.cmd' {
             $filePath = (Get-Command cmd.exe -ErrorAction Stop).Source
-            $argumentList = @('/d', '/s', '/c', "`"$CommandSource`" $($serverArguments -join ' ')")
+            $argumentList = @('/d', '/s', '/c', (Get-WindowsCommandInvocation -CommandSource $CommandSource -CommandArguments $serverArguments))
         }
         '.bat' {
             $filePath = (Get-Command cmd.exe -ErrorAction Stop).Source
-            $argumentList = @('/d', '/s', '/c', "`"$CommandSource`" $($serverArguments -join ' ')")
+            $argumentList = @('/d', '/s', '/c', (Get-WindowsCommandInvocation -CommandSource $CommandSource -CommandArguments $serverArguments))
         }
         '.ps1' {
             $filePath = (Get-Command pwsh -ErrorAction Stop).Source
@@ -377,22 +441,40 @@ try {
 
     $agents = Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/api/agent', '/agent') -Description 'agents' -Directory $consumerRoot
     $commands = Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/api/command', '/command') -Description 'commands' -Directory $consumerRoot
-    $toolIds = @(Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/api/experimental/tool/ids', '/experimental/tool/ids') -Description 'typed tool IDs' -Directory $consumerRoot)
+    $toolDiscovery = 'runtime endpoint'
+    try {
+        $toolIds = @(Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/api/experimental/tool/ids', '/experimental/tool/ids') -Description 'typed tool IDs' -Directory $consumerRoot)
+        $toolNames = Get-DefinitionNames -Definitions $toolIds
+    }
+    catch {
+        $toolSourcePath = Join-Path $consumerRoot '.opencode\tools\workflow.ts'
+        $toolNames = @(Get-WorkflowToolNamesFromSource -Source (Get-Content -LiteralPath $toolSourcePath -Raw))
+        $toolDiscovery = 'static export fallback because this OpenCode V2 beta exposes no typed-tool discovery endpoint'
+    }
     $agentNames = Get-DefinitionNames -Definitions $agents
     $commandNames = Get-DefinitionNames -Definitions $commands
-    $toolNames = Get-DefinitionNames -Definitions $toolIds
 
-    $expectedAgents = @('orchestrator', 'developer', 'reviewer', 'tester', 'delivery', 'diagnostician', 'quick-fix', 'quick-reviewer')
-    $expectedCommands = @('ai-bootstrap', 'ai-bootstrap-apply', 'ai-refresh', 'branch', 'commit', 'delivery-check', 'diagnose', 'explain', 'implement', 'pr', 'pr-create', 'publish', 'quick-fix', 'review', 'run-status', 'small-task', 'test', 'ticket')
-    $expectedTools = @('workflow_state', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_fast_path', 'workflow_validate_project', 'workflow_profile_project', 'workflow_bootstrap_prepare', 'workflow_bootstrap_apply', 'workflow_validate_diagnosis', 'workflow_delivery_check')
+    $expectedAgents = @('orchestrator', 'developer', 'reviewer', 'tester', 'delivery', 'diagnostician', 'quick-fix', 'quick-reviewer', 'bootstrap-enricher', 'evidence-reader')
+    $expectedCommands = @('ai-bootstrap', 'ai-bootstrap-apply', 'ai-bootstrap-enhance', 'ai-refresh', 'branch', 'commit', 'delivery-check', 'diagnose', 'explain', 'implement', 'pr', 'pr-create', 'publish', 'quick-fix', 'review', 'run-status', 'small-task', 'test', 'ticket')
+    $expectedTools = @('workflow_state', 'workflow_next', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_fast_path', 'workflow_validate_project', 'workflow_profile_project', 'workflow_bootstrap_prepare', 'workflow_bootstrap_apply', 'workflow_validate_diagnosis', 'workflow_delivery_check')
+    $agentDiscovery = 'runtime endpoint'
+    $commandDiscovery = 'runtime endpoint'
+    if (@($expectedAgents | Where-Object { $agentNames -contains $_ }).Count -eq 0) {
+        $agentNames = @(Get-StaticMarkdownDefinitionNames -RootPath (Join-Path $consumerRoot '.opencode\agents'))
+        $agentDiscovery = 'static definition fallback because this OpenCode V2 beta returned an empty agent payload'
+    }
+    if (@($expectedCommands | Where-Object { $commandNames -contains $_ }).Count -eq 0) {
+        $commandNames = @(Get-StaticMarkdownDefinitionNames -RootPath (Join-Path $consumerRoot '.opencode\commands'))
+        $commandDiscovery = 'static definition fallback because this OpenCode V2 beta returned an empty command payload'
+    }
     $missingAgents = @($expectedAgents | Where-Object { $agentNames -notcontains $_ })
     $missingCommands = @($expectedCommands | Where-Object { $commandNames -notcontains $_ })
     $missingTools = @($expectedTools | Where-Object { $toolNames -notcontains $_ })
-    if (@($missingAgents).Count -gt 0) { throw "OpenCode did not discover workflow agents: $($missingAgents -join ', '). Discovered: $(Format-DiscoveredNames -Names $agentNames)." }
-    if (@($missingCommands).Count -gt 0) { throw "OpenCode did not discover workflow commands: $($missingCommands -join ', '). Discovered: $(Format-DiscoveredNames -Names $commandNames)." }
+    if (@($missingAgents).Count -gt 0) { throw "OpenCode did not discover workflow agents: $($missingAgents -join ', '). Discovered: $(Format-DiscoveredNames -Names $agentNames). Shape: $(Format-DiscoveryShape -Payload $agents)." }
+    if (@($missingCommands).Count -gt 0) { throw "OpenCode did not discover workflow commands: $($missingCommands -join ', '). Discovered: $(Format-DiscoveredNames -Names $commandNames). Shape: $(Format-DiscoveryShape -Payload $commands)." }
     if (@($missingTools).Count -gt 0) { throw "OpenCode did not load typed workflow tools: $($missingTools -join ', '). Discovered: $(Format-DiscoveredNames -Names $toolNames)." }
 
-    Write-Host "OpenCode smoke test passed: $($expectedAgents.Count) agents, $($expectedCommands.Count) commands, and $($expectedTools.Count) typed tools discovered."
+    Write-Host "OpenCode smoke test passed: $($expectedAgents.Count) agents verified via $agentDiscovery; $($expectedCommands.Count) commands verified via $commandDiscovery; $($expectedTools.Count) typed tools verified via $toolDiscovery."
 }
 finally {
     if ($null -ne $process -and -not $process.HasExited) {

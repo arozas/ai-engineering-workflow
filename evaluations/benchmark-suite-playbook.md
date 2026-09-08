@@ -50,8 +50,13 @@ For every run, record actual values only:
 - final result: `PASS` or `FAIL`;
 - escaped defects after the workflow declared completion;
 - exact model profile used.
+- total tool calls and subagent delegations;
+- duplicate tool calls and protocol violations;
+- whether any agent reached its configured step limit.
 
 Use provider or OpenCode usage exports whenever available. If a value cannot be measured, leave the run out of the benchmark instead of estimating it.
+
+Run at least one suite with the intended economical model profile and one with the intended strong-model profile. Keep scenarios and acceptance tests identical. The purpose is not to require equal prose or implementation style; it is to prove that both profiles terminate, obey gates, and meet acceptance criteria while exposing their real token and tool-call cost.
 
 ## Quality rules
 

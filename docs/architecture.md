@@ -55,6 +55,8 @@ Legitimate control-plane updates are separate configuration work. Existing appli
 | `quick-fix` | Primary | Bounded low-risk implementation with one review and one correction maximum. | Approved fast-path application scope. |
 | `quick-reviewer` | Subagent | Compact independent review for fast-path work. | Read-only; no shell. |
 | `delivery` | Subagent | One explicitly approved branch, commit, push, or draft PR operation. | Guarded scripts and exact approved paths only. |
+| `evidence-reader` | Subagent | One bounded source/test evidence pass for a precise planning question. | Read-only; eight steps, no shell or subagents. |
+| `bootstrap-enricher` | Subagent | Optional semantic refinement of a deterministic bootstrap draft. | Proposal-only edits from the bounded evidence packet; eight steps. |
 
 The orchestrator never implements production code. Review agents do not rediscover the repository through shell access; they receive exact evidence packets. This reduces both privilege and repeated context consumption.
 
@@ -117,7 +119,7 @@ A blocked diagnostic run may begin another explicitly approved bounded iteration
 
 ## Deterministic execution boundary
 
-OpenCode custom tools in `.opencode/tools/workflow.ts` expose typed operations such as `workflow_state`, `workflow_gate`, `workflow_standard_review`, `workflow_quick_review`, `workflow_fast_path`, `workflow_validate_project`, and `workflow_bootstrap_apply`. Each tool validates its arguments and starts PowerShell with an argument vector rather than constructing a shell command string.
+OpenCode custom tools in `.opencode/tools/workflow.ts` expose typed operations such as `workflow_state`, `workflow_next`, `workflow_gate`, `workflow_standard_review`, `workflow_quick_review`, `workflow_fast_path`, `workflow_validate_project`, and `workflow_bootstrap_apply`. Each tool validates its arguments and starts PowerShell with an argument vector rather than constructing a shell command string. Model-facing state and gate responses are compact; complete evidence remains in persisted artifacts.
 
 The underlying scripts remain usable by maintainers and tests, but agents receive only the tools required by their roles. The global policy denies all `workflow_*` actions by default, after which agent definitions reopen exact actions.
 

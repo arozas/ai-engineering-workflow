@@ -7,6 +7,9 @@ permissions:
   - action: workflow_state
     resource: "*"
     effect: allow
+  - action: workflow_next
+    resource: "*"
+    effect: allow
   - action: workflow_gate
     resource: "*"
     effect: allow
@@ -27,6 +30,57 @@ permissions:
     effect: allow
   - action: workflow_delivery_check
     resource: "*"
+    effect: allow
+  - action: skill
+    resource: "*"
+    effect: deny
+  - action: skill
+    resource: "project-*"
+    effect: allow
+  - action: skill
+    resource: "stack-*"
+    effect: allow
+  - action: skill
+    resource: "architecture-*"
+    effect: allow
+  - action: skill
+    resource: "project-context"
+    effect: allow
+  - action: skill
+    resource: "workflow-state"
+    effect: allow
+  - action: skill
+    resource: "ticket-analysis"
+    effect: allow
+  - action: skill
+    resource: "implementation-plan"
+    effect: allow
+  - action: skill
+    resource: "azure-devops-ticket"
+    effect: allow
+  - action: skill
+    resource: "production-diagnosis"
+    effect: allow
+  - action: skill
+    resource: "delivery-safety"
+    effect: allow
+  - action: skill
+    resource: "conventional-commit"
+    effect: allow
+  - action: skill
+    resource: "pr-description"
+    effect: allow
+  - action: skill
+    resource: "explain-changes"
+    effect: allow
+  - action: skill
+    resource: "project-profiler"
+    effect: allow
+  - action: skill
+    resource: "project-skill-builder"
+    effect: allow
+  - action: skill
+    resource: "repo-bootstrap"
     effect: allow
   - action: edit
     resource: "*"
@@ -83,7 +137,10 @@ permissions:
     resource: "diagnostician"
     effect: allow
   - action: subagent
-    resource: "explore"
+    resource: "bootstrap-enricher"
+    effect: allow
+  - action: subagent
+    resource: "evidence-reader"
     effect: allow
 ---
 
@@ -99,7 +156,9 @@ For `/ai-bootstrap`, follow the command file before any normal planning behavior
 
 For `/ai-bootstrap-apply`, do not regenerate or reinterpret the proposal. Run `workflow_bootstrap_apply` first as a dry run, then apply only after explicit user approval. Report validator output instead of manually copying files.
 
-Before planning any non-bootstrap task, load `project-context` and `workflow-state`. For ticket work, load `ticket-analysis`; load `azure-devops-ticket` only when the configured provider is Azure DevOps. For an unknown production failure, load `production-diagnosis` and delegate only the bounded evidence packet to the read-only `diagnostician`. Load only the affected modules' `contextSkills`. Never rely on conversation history as the only record of an approved plan or diagnosis.
+Before planning any non-bootstrap task, load `project-context` and `workflow-state`. For ticket work, load `ticket-analysis`; load `azure-devops-ticket` only when the configured provider is Azure DevOps. Delegate at most one precisely scoped repository question to `evidence-reader`; do not perform or request an open-ended inventory. For an unknown production failure, load `production-diagnosis` and delegate only the bounded evidence packet to the read-only `diagnostician`. Load only the affected modules' `contextSkills`. Never rely on conversation history as the only record of an approved plan or diagnosis.
+
+For an existing run, call `workflow_next` once before choosing a transition. Follow one returned legal action and stop at an approval or terminal boundary. Do not repeat an unchanged state, profile, gate, review, or exploration call.
 
 Diagnosis is a separate read-only workflow. Never treat urgency as permission to use the fast path, mutate production, access secrets, deploy, roll back, restart services, or implement a speculative fix. Require a schema-valid persisted diagnosis with status `ROOT_CAUSE_CONFIRMED` before creating an implementation ticket from it. A confirmed diagnosis may be handed off only through an explicit `/ticket diagnosis:<run-id>` request.
 

@@ -56,9 +56,127 @@ function addSwitch(args: string[], name: string, enabled: boolean | undefined): 
   if (enabled) args.push(name)
 }
 
-function clip(value: string): string {
-  const limit = 24_000
-  return value.length <= limit ? value : `${value.slice(0, limit)}\n... output truncated ...`
+function clip(value: string, limit = 4_000): string {
+  return value.length <= limit ? value : `${value.slice(0, limit)}\n... output truncated; inspect the persisted artifact for details ...`
+}
+
+type ProcessResult = {
+  exitCode: number
+  stdout: string
+  stderr: string
+}
+
+function nextActions(status: string, workflowPath: string): string[] {
+  const actions: Record<string, string[]> = {
+    PLANNING: ["ApprovePlan", "Escalate"],
+    PLAN_APPROVED: ["CreateBranch (optional)", "BeginImplementation", "Escalate"],
+    IMPLEMENTING: ["workflow_gate", "RecordGates", "Escalate"],
+    GATES_PASSED: [workflowPath === "fast-path" ? "workflow_quick_review" : "workflow_standard_review", "Escalate"],
+    GATE_FAILED: ["BeginCorrection", "Escalate"],
+    REVIEW_FAILED: ["BeginCorrection", "Escalate"],
+    READY_FOR_DELIVERY: ["delivery-check", "commit", "stop"],
+    COMMITTED: ["publish", "stop"],
+    PUBLISHED: ["draft-pr", "stop"],
+    DRAFT_PR_CREATED: ["stop"],
+    DIAGNOSING: ["RecordDiagnosis", "Escalate"],
+    DIAGNOSIS_BLOCKED: ["BeginDiagnosticIteration", "Escalate"],
+    ROOT_CAUSE_CONFIRMED: ["/ticket diagnosis:<run-id>", "stop"],
+    ESCALATED: ["stop"],
+  }
+  return actions[status] || ["stop and inspect the persisted run"]
+}
+
+function compactState(value: any, exitCode: number): string {
+  const artifacts = Object.entries(value.artifacts || {}).map(([name, record]: [string, any]) => ({
+    name,
+    path: record?.path,
+    verdict: record?.verdict,
+  }))
+  return JSON.stringify(
+    {
+      exitCode,
+      runId: value.runId,
+      workflowPath: value.workflowPath,
+      status: value.status,
+      currentSha: value.currentSha,
+      affectedModules: value.qualityPlan?.affectedModuleIds || [],
+      correctionBudget: {
+        used: value.correctionIterations,
+        maximum: value.maximumCorrectionIterations,
+      },
+      diagnosticBudget: {
+        used: value.diagnosticIterations,
+        maximum: value.maximumDiagnosticIterations,
+      },
+      artifacts,
+      nextActions: nextActions(String(value.status || ""), String(value.workflowPath || "")),
+      terminal: ["DRAFT_PR_CREATED", "ROOT_CAUSE_CONFIRMED", "ESCALATED"].includes(String(value.status || "")),
+    },
+    null,
+    2,
+  )
+}
+
+function compactGate(value: any, exitCode: number): string {
+  const modules = (Array.isArray(value.modules) ? value.modules : []).map((module: any) => {
+    const failures: any[] = []
+    for (const phase of Array.isArray(module.phases) ? module.phases : []) {
+      for (const command of Array.isArray(phase.commands) ? phase.commands : []) {
+        if (command.status === "FAIL") {
+          failures.push({
+            phase: phase.name,
+            command: command.command,
+            exitCode: command.exitCode,
+            timedOut: command.timedOut,
+            stderr: clip(String(command.stderr || ""), 2_000),
+            stdout: clip(String(command.stdout || ""), 2_000),
+          })
+        }
+      }
+    }
+    return { id: module.id, overall: module.overall, failures }
+  })
+  return JSON.stringify(
+    {
+      exitCode,
+      verdict: value.overall,
+      runId: value.runId,
+      artifact: `.ai/runtime/${value.runId}/gates.json`,
+      worktreeStable: value.worktreeStable,
+      worktreeFingerprint: value.worktreeFingerprint,
+      modules,
+      next: value.overall === "PASS" ? "RecordGates with PASS" : "RecordGates with FAIL; do not rerun unchanged gates",
+    },
+    null,
+    2,
+  )
+}
+
+function formatProcessResult(result: ProcessResult): string {
+  const stdout = result.stdout.trim()
+  if (stdout) {
+    try {
+      const parsed = JSON.parse(stdout)
+      if (parsed && parsed.runId && parsed.status && parsed.workflowPath) {
+        return compactState(parsed, result.exitCode)
+      }
+      if (parsed && parsed.runId && parsed.overall && Array.isArray(parsed.modules)) {
+        return compactGate(parsed, result.exitCode)
+      }
+      return JSON.stringify({ exitCode: result.exitCode, ...parsed }, null, 2)
+    } catch {
+      // Non-JSON command output is reported through the bounded fallback below.
+    }
+  }
+  return JSON.stringify(
+    {
+      exitCode: result.exitCode,
+      stdout: clip(stdout),
+      stderr: clip(result.stderr.trim()),
+    },
+    null,
+    2,
+  )
 }
 
 async function invokePowerShell(
@@ -79,15 +197,7 @@ async function invokePowerShell(
     process.exited,
   ])
 
-  return JSON.stringify(
-    {
-      exitCode,
-      stdout: clip(stdout.trimEnd()),
-      stderr: clip(stderr.trimEnd()),
-    },
-    null,
-    2,
-  )
+  return formatProcessResult({ exitCode, stdout, stderr })
 }
 
 async function recordReview(
@@ -158,6 +268,14 @@ export const state = tool({
   },
 })
 
+export const next = tool({
+  description: "Return the compact current state and deterministic next legal actions for one workflow run.",
+  args: { runId },
+  async execute(input, context) {
+    return invokePowerShell("workflow-state.ps1", ["-Action", "Show", "-RunId", input.runId], context)
+  },
+})
+
 export const standard_review = tool({
   description: "Persist a schema-valid standard review and atomically advance its exact workflow run.",
   args: reviewArgs,
@@ -180,11 +298,13 @@ export const gate = tool({
     runId,
     timeoutSeconds: tool.schema.number().int().min(1).max(86400).optional(),
     continueAfterFailure: tool.schema.boolean().optional(),
+    force: tool.schema.boolean().optional(),
   },
   async execute(input, context) {
     const args = ["-RunId", input.runId]
     addValue(args, "-TimeoutSeconds", input.timeoutSeconds)
     addSwitch(args, "-ContinueAfterFailure", input.continueAfterFailure)
+    addSwitch(args, "-Force", input.force)
     return invokePowerShell("run-quality-gates.ps1", args, context)
   },
 })
@@ -259,9 +379,13 @@ export const profile_project = tool({
 
 export const bootstrap_prepare = tool({
   description: "Prepare a durable bootstrap proposal under .ai/bootstrap-proposal and validate it as a dry run.",
-  args: {},
-  async execute(_input, context) {
-    return invokePowerShell("prepare-bootstrap-proposal.ps1", [], context)
+  args: {
+    force: tool.schema.boolean().optional(),
+  },
+  async execute(input, context) {
+    const args: string[] = []
+    addSwitch(args, "-Force", input.force)
+    return invokePowerShell("prepare-bootstrap-proposal.ps1", args, context)
   },
 })
 

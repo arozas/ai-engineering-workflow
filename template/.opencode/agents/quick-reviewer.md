@@ -4,6 +4,27 @@ mode: subagent
 color: "#fb7185"
 steps: 8
 permissions:
+  - action: skill
+    resource: "*"
+    effect: deny
+  - action: skill
+    resource: "project-context"
+    effect: allow
+  - action: skill
+    resource: "fast-path"
+    effect: allow
+  - action: skill
+    resource: "code-review"
+    effect: allow
+  - action: skill
+    resource: "stack-*"
+    effect: allow
+  - action: skill
+    resource: "architecture-*"
+    effect: allow
+  - action: skill
+    resource: "project-*"
+    effect: allow
   - action: workflow_quick_review
     resource: "*"
     effect: allow

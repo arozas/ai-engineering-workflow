@@ -5,4 +5,4 @@ agent: orchestrator
 
 Inspect persisted workflow run `$ARGUMENTS`.
 
-Load `workflow-state`. Require an exact run ID, call `workflow_state` with action `Validate`, then call it with action `Show`. Report status, workflow path, source run when present, base/current SHA, correction or diagnostic-iteration use, approved quality plan, artifact hashes, and the next legal action. Do not edit production files or advance the run.
+Load `workflow-state`. Require an exact run ID and call `workflow_next` once; it validates the persisted run while returning compact status and legal next actions. Report that result without another state call. Do not edit production files or advance the run.

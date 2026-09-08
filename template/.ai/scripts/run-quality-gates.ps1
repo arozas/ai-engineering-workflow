@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory = $true)][ValidatePattern('^[a-z0-9][a-z0-9-]{2,63}$')][string]$RunId,
     [ValidateRange(1, 86400)][int]$TimeoutSeconds = 900,
-    [switch]$ContinueAfterFailure
+    [switch]$ContinueAfterFailure,
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -215,8 +216,35 @@ try {
         throw "Run '$RunId' quality plan is stale or does not match .ai/project.json."
     }
 
-    $generatedAt = [DateTime]::UtcNow.ToString('o')
     $startedFingerprint = Get-WorktreeFingerprint -RepositoryRoot $repositoryRoot
+    if (-not $Force -and (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
+        try {
+            $existingJson = Get-Content -LiteralPath $outputPath -Raw
+            $existingSchema = Get-Content -LiteralPath $gateSchemaPath -Raw
+            if ($existingJson | Test-Json -Schema $existingSchema -ErrorAction Stop) {
+                $existing = $existingJson | ConvertFrom-Json
+                $currentProjectHash = Get-FileSha256 -Path $projectPath
+                $currentRunnerHash = Get-FileSha256 -Path $runnerPath
+                if ([string]$existing.runId -eq $RunId -and
+                    [string]$existing.projectSha256 -eq $currentProjectHash -and
+                    [string]$existing.runnerSha256 -eq $currentRunnerHash -and
+                    [string]$existing.qualityPlanSha256 -eq $qualityPlan.MatrixSha256 -and
+                    [bool]$existing.worktreeStable -and
+                    [string]$existing.startedWorktreeFingerprint -eq $startedFingerprint -and
+                    [string]$existing.worktreeFingerprint -eq $startedFingerprint) {
+                    Write-Output $existingJson
+                    if ([string]$existing.overall -eq 'PASS') { exit 0 }
+                    if ([string]$existing.overall -eq 'INCOMPLETE_CONFIGURATION') { exit 2 }
+                    exit 1
+                }
+            }
+        }
+        catch {
+            # Invalid or stale runtime evidence is replaced by a fresh deterministic run.
+        }
+    }
+
+    $generatedAt = [DateTime]::UtcNow.ToString('o')
     $moduleResults = @()
     foreach ($module in $qualityPlan.Modules) {
         $modulePath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot ([string]$module.path)))

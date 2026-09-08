@@ -30,6 +30,8 @@ Choose capabilities by role rather than hard-coding product names in the distrib
 | `quick-fix` | Balanced implementation model | It must be capable enough for a small fix but efficient enough to preserve the fast path's value. |
 | `quick-reviewer` | Fast analytical model | It receives a compact evidence packet and performs a narrow independent review. |
 | `delivery` | Deterministic, economical instruction-following model | Operations are tightly scripted; exact compliance is more valuable than creative reasoning. |
+| `evidence-reader` | Fast analytical model | It answers one precise code question under an eight-step and ten-file budget. |
+| `bootstrap-enricher` | Strong analysis model, optional | It extracts project-specific semantics from a small representative packet; skip it when the deterministic baseline is sufficient. |
 
 Use stronger classes when domain complexity demands them. For example, cryptography, concurrency, or subtle compiler behavior may justify a frontier reviewer/tester even when the role normally uses an economical model.
 
@@ -38,6 +40,22 @@ Use stronger classes when domain complexity demands them. For example, cryptogra
 The standard workflow optimizes for reliability per approved change, not minimum tokens per prompt. It intentionally pays for planning, specialized context, independent review, and correction when risk justifies them. Compared with repeatedly iterating in a general editor chat, it can still reduce waste because approvals and evidence are persisted, agents receive bounded packets, and failed stages have explicit stop conditions.
 
 It becomes inefficient when every typo or obvious one-file change is routed through the full orchestrator/developer/tester/reviewer chain. The fast path addresses that case.
+
+## Small and large model compatibility
+
+The default route is designed to remain usable by small instruction-following models without reducing what a larger model can reason about:
+
+- deterministic scripts own profiling, quality execution, state transitions, fingerprints, and verdict derivation;
+- every agent has a hard `steps` ceiling, and specialized evidence agents use eight steps;
+- agent-specific skill allowlists prevent OpenCode from advertising the full skill catalog on every turn;
+- `workflow_next` returns only compact state, budgets, artifacts, and legal next actions;
+- gate responses contain the verdict and failures while full command evidence remains on disk;
+- repeated bootstrap preserves a current draft, and repeated unchanged gates reuse validated evidence;
+- prompts define repeated unchanged inspection, delegation, classification, gate, or review calls as protocol violations.
+
+For bootstrap, `/ai-bootstrap` is the economical deterministic baseline. `/ai-bootstrap-enhance` is an optional second stage for a stronger model. It reads only the generated evidence packet and representative files, so a larger model can extract semantic local conventions without reopening an unlimited repository search. The large model is not artificially restricted to the small model's reasoning quality; both share the same safety and iteration boundaries.
+
+These controls prevent unbounded behavior; they cannot guarantee that every small model follows every instruction or produces the same plan quality as a frontier model. If a model reaches its step limit, repeats a tool call, invents missing evidence, or fails a structured handoff, treat that as an evaluation failure and switch the affected role to a stronger model. Do not increase all step budgets first.
 
 ## Efficiency mechanisms
 
@@ -58,7 +76,7 @@ Requirements, plans, hashes, gates, reviews, and run status live under `.ai/runs
 
 ### Bound exploration
 
-Bootstrap, fast-path diagnosis, production diagnosis, correction cycles, and review packets all have explicit budgets. Repeating equivalent searches is a stop signal, not a reason for more browsing.
+Bootstrap, ticket evidence reading, fast-path diagnosis, production diagnosis, correction cycles, and review packets all have explicit budgets. The `evidence-reader` accepts one precise question, reads at most six production and four test files, and stops. Repeating equivalent searches is a protocol violation, not a reason for more browsing.
 
 ### Use deterministic computation
 
@@ -70,7 +88,7 @@ Profiling, schema validation, scope counts, Git fingerprints, command execution,
 
 ## Measuring instead of guessing
 
-`evaluations/benchmark.schema.json` defines comparable runs with workflow path, model profile, input/output tokens, cost, duration, corrections, result, and escaped defects. Record the same representative scenario under standard and fast-path routes, then summarize:
+`evaluations/benchmark.schema.json` defines comparable runs with workflow path, model profile, input/output tokens, cost, duration, corrections, result, and escaped defects. It also accepts operational loop indicators: tool calls, duplicate tool calls, subagent delegations, protocol violations, and whether the step limit was reached. Record the same representative scenario under standard and fast-path routes, then summarize:
 
 ```powershell
 pwsh -NoProfile -File .\scripts\summarize-evaluations.ps1 `
@@ -86,11 +104,13 @@ Evaluate at least:
 - gate/review success;
 - escaped defects or human-discovered misses;
 - frequency of inappropriate fast-path escalation or acceptance.
+- duplicate tool calls and protocol violations;
+- step-limit exhaustion and unnecessary delegation count.
 
 The cheapest run is not efficient if it ships defects. The most thorough run is not efficient if a deterministic one-file task consumes four large-model handoffs.
 
 ## Practical defaults
 
-Start with a high-capability orchestrator and diagnostician, a strong developer/reviewer, a faster tester/quick-reviewer, a balanced quick-fix model, and an economical delivery model. Keep temperature/reasoning settings conservative for state and delivery roles. Benchmark your own ticket mix before optimizing further.
+Start with a high-capability orchestrator and diagnostician, a strong developer/reviewer, a faster tester/quick-reviewer/evidence-reader, a balanced quick-fix model, and an economical delivery model. Use the deterministic bootstrap baseline with small models; assign a stronger model to `bootstrap-enricher` only when semantic project rules justify the extra cost. Keep temperature/reasoning settings conservative for state and delivery roles. Benchmark your own ticket mix before optimizing further.
 
 Do not use model choice to weaken permissions or deterministic checks. A more capable model is not a security boundary, and a cheaper model should not be asked to compensate for missing project context.
