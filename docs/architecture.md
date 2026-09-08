@@ -77,6 +77,7 @@ Every standard, fast-path, or diagnostic request gets one local run:
   state.json
   requirement.md
   plan.md
+  verification.json
   branch.json
   gates.json
   review.json

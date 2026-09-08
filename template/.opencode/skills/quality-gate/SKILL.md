@@ -6,9 +6,9 @@ compatibility: opencode-v2
 
 ## Source of truth
 
-At plan approval, `workflow_state` persists the exact affected module IDs and hashes the corresponding quality-command matrix from `.ai/project.json`. Invoke `workflow_gate` once with only the approved run ID. The caller cannot select or omit modules.
+At plan approval, `workflow_state` persists the exact affected module IDs, copies and hashes `verification.json`, and hashes the merged quality-command matrix from `.ai/project.json` plus approved run-specific commands. Invoke `workflow_gate` once with only the approved run ID. The caller cannot select or omit modules or commands.
 
-The runner validates the current project configuration and persisted run, rejects a stale project or matrix, executes every frozen command with the module `path` as working directory, writes schema-valid evidence atomically to `.ai/runtime/<run-id>/gates.json`, and returns a factual exit code. Do not execute an equivalent hand-written sequence and do not create, repair, or edit `gates.json` manually.
+The runner validates the current project configuration, persisted verification manifest, and persisted run; rejects a stale project, manifest, or matrix; executes every frozen command with the module `path` as working directory; writes schema-valid evidence atomically to `.ai/runtime/<run-id>/gates.json`; and returns a factual exit code. Do not execute an equivalent hand-written sequence and do not create, repair, or edit `gates.json` manually.
 
 The runner uses this fixed phase order:
 

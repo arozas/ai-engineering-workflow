@@ -27,13 +27,14 @@ Run `/ticket <ticket, specification, or requirement>`. The orchestrator normaliz
 - implementation steps and design decisions;
 - success, boundary, failure, authorization, and regression scenarios;
 - exact configured quality commands;
+- exact task-specific verification commands that are required but not yet configured;
 - risks and unresolved questions.
 
 No production code changes during planning.
 
 ### Approve
 
-Correct the proposal or explicitly approve it. Approval persists the exact plan and affected module IDs. State hashes the current `.ai/project.json` and the complete phase/command matrix for those modules.
+Correct the proposal or explicitly approve it. Planning always writes `.ai/runtime/<run-id>/verification.json`; its command list is empty when configured gates are sufficient. Approval persists the exact plan, verification manifest, and affected module IDs. State validates and hashes the manifest, hashes the current `.ai/project.json`, and freezes the complete merged phase/command matrix for those modules. A mandatory command mentioned only in prose is not approval-ready.
 
 Changing module selection later requires a new approved plan. Conversation history alone is not approval.
 
@@ -47,7 +48,7 @@ The tester may add focused tests only in established test locations. If testing 
 
 ### Gate
 
-`workflow_gate` receives the run ID. It obtains the module list from state, verifies project and matrix hashes, and executes phases in this fixed order:
+`workflow_gate` receives the run ID. It obtains the module list and approved verification manifest from state, verifies project, manifest, and merged-matrix hashes, and executes phases in this fixed order:
 
 1. `restore`
 2. `build`
@@ -56,7 +57,7 @@ The tester may add focused tests only in established test locations. If testing 
 5. `test`
 6. `e2e`
 
-Array order within a phase is preserved. An empty phase is `NOT CONFIGURED`. The first failure normally stops that module and later commands become `NOT RUN`. A module with no configured commands is incomplete, not passing.
+Configured commands run first and approved task-specific commands follow in manifest order within the same phase. An empty phase is `NOT CONFIGURED`. The first failure normally stops that module and later commands become `NOT RUN`. A module with no commands is incomplete, not passing.
 
 The runner writes `.ai/runtime/<run-id>/gates.json`. If the run, project, runner, matrix, and worktree fingerprints are unchanged, a repeated gate request returns the existing validated artifact instead of executing commands again. `force: true` is reserved for an explicit intentional rerun. State accepts only that run-specific path and independently validates the run ID, module identities and paths, phases and commands, hashes, exit-derived status, and worktree stability before accepting it. Other active runs keep separate staging directories.
 
@@ -82,9 +83,9 @@ A `BLOCKER` or `HIGH` finding requires an approved correction, a full gate rerun
 
 Project configuration may lower these limits but cannot raise them.
 
-Before editing, the agent runs `workflow_fast_path` in `Estimate` mode and presents a compact micro-plan with exact paths, line estimate, verification, risk flags, evidence, and non-goals. One explicit approval authorizes only that scope.
+Before editing, the agent runs `workflow_fast_path` in `Estimate` mode and presents a compact micro-plan plus a run-specific verification manifest with exact paths, line estimate, verification, risk flags, evidence, and non-goals. One explicit approval authorizes only those exact artifacts.
 
-After implementation, it runs the frozen quality matrix and `workflow_fast_path` in `Actual` mode. Actual mode derives files, line counts, module mapping, untracked files, binary uncertainty, and conservative path risks from Git. Expansion returns `FAST PATH INVALIDATED`.
+After implementation, it runs the frozen merged quality matrix and `workflow_fast_path` in `Actual` mode. Actual mode derives files, line counts, module mapping, untracked files, binary uncertainty, and conservative path risks from Git. Expansion returns `FAST PATH INVALIDATED`.
 
 The quick reviewer receives only the requirement, approved micro-plan, exact diff, gate results, and classifier output. It records through the separate `workflow_quick_review` capability; the standard reviewer uses `workflow_standard_review`. A failed second review after the single correction allowance escalates to `/ticket`.
 
@@ -107,7 +108,7 @@ Iterations are persisted and capped at three. A confirmed diagnosis starts imple
 Delivery is split into single operations:
 
 1. `/delivery-check` evaluates readiness without mutation.
-2. `/branch` proposes one local feature branch.
+2. `/branch` obtains readiness through the typed delivery check and proposes one local feature branch without attempting raw Git shell probes.
 3. `/commit` proposes exact staged paths and a Conventional Commit.
 4. `/publish` proposes a normal feature-branch push.
 5. `/pr-create` proposes a draft PR with explicit base and head.

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI Engineering Workflow run-specific verification manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runId", "commands"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+    "commands": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "$ref": "#/$defs/command" }
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["moduleId", "phase", "command", "reason"],
+      "properties": {
+        "moduleId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "phase": { "enum": ["restore", "build", "lint", "typecheck", "test", "e2e"] },
+        "command": { "type": "string", "minLength": 1, "maxLength": 1000, "pattern": "^[^\\r\\n]+$" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1000, "pattern": "^[^\\r\\n]+$" }
+      }
+    }
+  }
+}

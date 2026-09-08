@@ -251,6 +251,7 @@ export const state = tool({
     taskType: tool.schema.string().min(1).max(80).optional(),
     sourceRunId: runId.optional(),
     artifactPath: relativePath.optional(),
+    verificationPath: relativePath.optional(),
     affectedModules: tool.schema.array(tool.schema.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)).min(1).optional(),
     verdict: tool.schema.enum(["PASS", "FAIL", "ESCALATE"]).optional(),
     reason: tool.schema.string().min(1).max(2000).optional(),
@@ -261,6 +262,7 @@ export const state = tool({
     addValue(args, "-TaskType", input.taskType)
     addValue(args, "-SourceRunId", input.sourceRunId)
     addValue(args, "-ArtifactPath", input.artifactPath)
+    addValue(args, "-VerificationPath", input.verificationPath)
     addValue(args, "-AffectedModules", input.affectedModules?.join(","))
     addValue(args, "-Verdict", input.verdict)
     addValue(args, "-Reason", input.reason)

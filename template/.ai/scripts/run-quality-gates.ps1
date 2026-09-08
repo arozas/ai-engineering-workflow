@@ -32,7 +32,55 @@ function Get-FileSha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
-function Get-QualityPlan([object]$Project, [string[]]$AffectedModuleIds, [string]$ProjectPath) {
+function Get-TaskVerification(
+    [string]$VerificationPath,
+    [string]$SchemaPath,
+    [string]$ExpectedRunId,
+    [string[]]$AffectedModuleIds
+) {
+    foreach ($requiredPath in @($VerificationPath, $SchemaPath)) {
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+            throw "Required run-specific verification input not found: $requiredPath"
+        }
+    }
+    $json = Get-Content -LiteralPath $VerificationPath -Raw
+    $schema = Get-Content -LiteralPath $SchemaPath -Raw
+    if (-not ($json | Test-Json -Schema $schema -ErrorAction Stop)) {
+        throw 'Run-specific verification manifest failed schema validation.'
+    }
+    $manifest = $json | ConvertFrom-Json
+    if ([string]$manifest.runId -ne $ExpectedRunId) {
+        throw 'Run-specific verification manifest belongs to a different workflow run.'
+    }
+    $unsafeCommandPattern = '(?i)(?:^|\s)(?:git\s+(?:add|commit|push|merge|rebase|reset|clean|tag|branch|switch|checkout)|gh\s+(?:pr\s+(?:create|edit|ready|merge)|release|secret|variable|workflow\s+run)|kubectl\s+(?:apply|delete|patch|scale|rollout|exec|cp)|terraform\s+(?:apply|destroy|import|taint|untaint)|az\s+deployment)(?:\s|$)'
+    $seen = @{}
+    foreach ($record in @($manifest.commands)) {
+        $moduleId = [string]$record.moduleId
+        if ($AffectedModuleIds -notcontains $moduleId) {
+            throw "Run-specific verification references module '$moduleId' outside the approved affected modules."
+        }
+        $command = [string]$record.command
+        if ($command -match $unsafeCommandPattern) {
+            throw "Run-specific verification contains a delivery or mutation command: $command"
+        }
+        $key = "$moduleId`n$([string]$record.phase)`n$command"
+        if ($seen.ContainsKey($key)) {
+            throw "Run-specific verification contains a duplicate command for module '$moduleId': $command"
+        }
+        $seen[$key] = $true
+    }
+    return [pscustomobject]@{
+        Sha256 = Get-FileSha256 -Path $VerificationPath
+        Manifest = $manifest
+    }
+}
+
+function Get-QualityPlan(
+    [object]$Project,
+    [string[]]$AffectedModuleIds,
+    [string]$ProjectPath,
+    [object]$TaskVerification
+) {
     $requestedIds = @(
         $AffectedModuleIds |
             ForEach-Object { ([string]$_).Trim() } |
@@ -54,9 +102,19 @@ function Get-QualityPlan([object]$Project, [string[]]$AffectedModuleIds, [string
                 path = ([string]$module.path).Replace('\', '/')
                 phases = @(
                     foreach ($phaseName in $script:phaseOrder) {
+                        $configuredCommands = @($module.quality.$phaseName | ForEach-Object { [string]$_ })
+                        $runCommands = @(
+                            $TaskVerification.Manifest.commands |
+                                Where-Object { [string]$_.moduleId -eq $moduleId -and [string]$_.phase -eq $phaseName } |
+                                ForEach-Object { [string]$_.command }
+                        )
+                        $duplicates = @($runCommands | Where-Object { $configuredCommands -contains $_ })
+                        if ($duplicates.Count -gt 0) {
+                            throw "Run-specific verification duplicates a configured command for module '$moduleId' phase '$phaseName': $($duplicates -join ', ')"
+                        }
                         [ordered]@{
                             name = $phaseName
-                            commands = @($module.quality.$phaseName | ForEach-Object { [string]$_ })
+                            commands = @($configuredCommands + $runCommands)
                         }
                     }
                 )
@@ -68,6 +126,7 @@ function Get-QualityPlan([object]$Project, [string[]]$AffectedModuleIds, [string
         AffectedModuleIds = $requestedIds
         ProjectSha256 = Get-FileSha256 -Path $ProjectPath
         MatrixSha256 = Get-StringSha256 -Value $matrixJson
+        VerificationSha256 = $TaskVerification.Sha256
         Modules = $modules
     }
 }
@@ -188,13 +247,15 @@ try {
     $repositoryRoot = Get-RepositoryRoot
     $projectPath = Join-Path $repositoryRoot '.ai\project.json'
     $projectSchemaPath = Join-Path $repositoryRoot '.ai\project.schema.json'
+    $verificationSchemaPath = Join-Path $repositoryRoot '.ai\task-verification.schema.json'
     $gateSchemaPath = Join-Path $repositoryRoot '.ai\quality-gates.schema.json'
     $runSchemaPath = Join-Path $repositoryRoot '.ai\workflow-run.schema.json'
     $statePath = Join-Path $repositoryRoot ".ai\runs\$RunId\state.json"
+    $runRoot = Split-Path -Parent $statePath
     $outputPath = Join-Path $repositoryRoot ".ai\runtime\$RunId\gates.json"
     $runnerPath = $MyInvocation.MyCommand.Path
 
-    foreach ($requiredPath in @($projectPath, $projectSchemaPath, $gateSchemaPath, $runSchemaPath, $statePath, $runnerPath)) {
+    foreach ($requiredPath in @($projectPath, $projectSchemaPath, $verificationSchemaPath, $gateSchemaPath, $runSchemaPath, $statePath, $runnerPath)) {
         if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) { throw "Required quality-gate input not found: $requiredPath" }
     }
 
@@ -210,9 +271,19 @@ try {
     $state = $stateJson | ConvertFrom-Json
     if ([string]$state.status -ne 'IMPLEMENTING') { throw "Run '$RunId' must be in IMPLEMENTING state to execute quality gates." }
     if ($null -eq $state.qualityPlan) { throw "Run '$RunId' has no approved quality plan. Approve a new plan with affected modules." }
-    $qualityPlan = Get-QualityPlan -Project $project -AffectedModuleIds @($state.qualityPlan.affectedModuleIds) -ProjectPath $projectPath
+    if (-not ($state.artifacts.PSObject.Properties.Name -contains 'verification')) {
+        throw "Run '$RunId' has no approved run-specific verification manifest."
+    }
+    $verificationPath = Join-Path $runRoot ([string]$state.artifacts.verification.path)
+    $verification = Get-TaskVerification -VerificationPath $verificationPath -SchemaPath $verificationSchemaPath -ExpectedRunId $RunId -AffectedModuleIds @($state.qualityPlan.affectedModuleIds)
+    if ([string]$state.artifacts.verification.sha256 -ne $verification.Sha256 -or
+        [string]$state.qualityPlan.verificationSha256 -ne $verification.Sha256) {
+        throw "Run '$RunId' verification manifest hash does not match approved state."
+    }
+    $qualityPlan = Get-QualityPlan -Project $project -AffectedModuleIds @($state.qualityPlan.affectedModuleIds) -ProjectPath $projectPath -TaskVerification $verification
     if ([string]$state.qualityPlan.projectSha256 -ne $qualityPlan.ProjectSha256 -or
-        [string]$state.qualityPlan.matrixSha256 -ne $qualityPlan.MatrixSha256) {
+        [string]$state.qualityPlan.matrixSha256 -ne $qualityPlan.MatrixSha256 -or
+        [string]$state.qualityPlan.verificationSha256 -ne $qualityPlan.VerificationSha256) {
         throw "Run '$RunId' quality plan is stale or does not match .ai/project.json."
     }
 

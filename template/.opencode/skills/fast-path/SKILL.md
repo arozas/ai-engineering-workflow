@@ -57,7 +57,7 @@ Estimate classification is deterministic for declared evidence. Semantic risks s
 
 ## Micro-plan and approval
 
-Present one compact micro-plan containing:
+Persist one compact micro-plan and `.ai/runtime/<run-id>/verification.json`. The manifest must contain each mandatory command not already configured for the affected module and may be empty only when configured gates fully prove the acceptance criteria. Present:
 
 - task type: quick fix or small task
 - evidence and root cause, when applicable
@@ -69,13 +69,13 @@ Present one compact micro-plan containing:
 - classifier verdict
 - explicit non-goals
 
-Wait for one explicit approval before editing. Approval applies only to the exact micro-plan and does not authorize scope expansion or delivery operations.
+Wait for one explicit approval of the micro-plan and verification manifest before editing. Call `ApprovePlan` with both paths and the affected module. Approval applies only to those exact artifacts and does not authorize scope expansion or delivery operations.
 
 ## Execution
 
 Implement the smallest correct diff. For a quick fix, add or update the smallest valuable regression test whenever an established test location exists. A small task may change documentation, local configuration, or mechanical code only within its approved paths.
 
-Run the exact configured quality gates for the affected module. For a module-free documentation task, run the exact deterministic validation identified in the micro-plan. Missing, skipped, denied, interrupted, or failing verification is never PASS.
+Run the exact frozen configured plus approved run-specific quality gates for the affected module. For a module-free documentation task, bind its deterministic validation to an explicitly selected module or escalate when no safe working directory exists. Missing, skipped, denied, interrupted, or failing verification is never PASS.
 
 After implementation:
 

@@ -37,6 +37,15 @@ function Get-RunRuntimeRelativePath([string]$RunId, [string]$FileName) {
     return ".ai/runtime/$RunId/$FileName"
 }
 
+function Set-RunVerification([string]$RunId, [object[]]$Commands = @()) {
+    [ordered]@{
+        schemaVersion = 1
+        runId = $RunId
+        commands = @($Commands)
+    } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Get-RunRuntimePath $RunId 'verification.json') -Encoding utf8
+    return Get-RunRuntimeRelativePath $RunId 'verification.json'
+}
+
 function Add-ManagedLocalExclude([string]$RelativePattern) {
     $excludePath = @(& git -C $repositoryRoot rev-parse --path-format=absolute --git-path info/exclude)[0]
     $excludeContent = Get-Content -LiteralPath $excludePath -Raw
@@ -69,7 +78,7 @@ try {
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-Mode', 'Local') | Out-Null
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local installation remains invisible to Git.'
     $metadata = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\workflow-installation.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($metadata.workflowVersion -eq '1.12.0') -Message 'Installed metadata records version 1.12.0.'
+    Assert-True -Condition ($metadata.workflowVersion -eq '1.13.0') -Message 'Installed metadata records version 1.13.0.'
 
     $profileScript = Join-Path $repositoryRoot '.ai\scripts\profile-project.ps1'
     $profileOutput = Invoke-PowerShell -ScriptPath $profileScript -Arguments @('-OutputPath', '.ai/project-profile.json') -WorkingDirectory $repositoryRoot
@@ -257,15 +266,43 @@ Applies to `src/app`.
     $stateScript = Join-Path $repositoryRoot '.ai\scripts\workflow-state.ps1'
     $gateRunner = Join-Path $repositoryRoot '.ai\scripts\run-quality-gates.ps1'
 
+    $missingVerificationRunId = 'gate-missing-verification'
+    Set-Content -LiteralPath (Get-RunRuntimePath $missingVerificationRunId 'requirement.md') -Value 'Reject approval without a verification manifest.' -Encoding utf8
+    Set-Content -LiteralPath (Get-RunRuntimePath $missingVerificationRunId 'plan.md') -Value 'This plan intentionally omits verification.json.' -Encoding utf8
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $missingVerificationRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', (Get-RunRuntimeRelativePath $missingVerificationRunId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $missingVerificationRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $missingVerificationRunId 'plan.md'), '-AffectedModules', 'app') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Assert-True -Condition $true -Message 'Plan approval rejects a missing run-specific verification manifest.'
+
+    $unsafeVerificationRunId = 'gate-unsafe-verification'
+    Set-Content -LiteralPath (Get-RunRuntimePath $unsafeVerificationRunId 'requirement.md') -Value 'Reject a mutation command in verification.' -Encoding utf8
+    Set-Content -LiteralPath (Get-RunRuntimePath $unsafeVerificationRunId 'plan.md') -Value 'This plan intentionally proposes unsafe verification.' -Encoding utf8
+    $unsafeVerificationPath = Set-RunVerification -RunId $unsafeVerificationRunId -Commands @([ordered]@{
+        moduleId = 'app'
+        phase = 'test'
+        command = 'git push origin main'
+        reason = 'Unsafe fixture that must be rejected.'
+    })
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $unsafeVerificationRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', (Get-RunRuntimeRelativePath $unsafeVerificationRunId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $unsafeVerificationRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $unsafeVerificationRunId 'plan.md'), '-VerificationPath', $unsafeVerificationPath, '-AffectedModules', 'app') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Assert-True -Condition $true -Message 'Plan approval rejects delivery and mutation commands from run-specific verification.'
+
     $passingGateRunId = 'gate-pass-app'
     Set-Content -LiteralPath (Get-RunRuntimePath $passingGateRunId 'requirement.md') -Value 'Verify the passing quality-gate fixture.' -Encoding utf8
     Set-Content -LiteralPath (Get-RunRuntimePath $passingGateRunId 'plan.md') -Value 'Run the configured app quality matrix.' -Encoding utf8
+    $passingVerificationPath = Set-RunVerification -RunId $passingGateRunId -Commands @([ordered]@{
+        moduleId = 'app'
+        phase = 'test'
+        command = 'pwsh -NoProfile -Command "exit 0" # run-specific'
+        reason = 'Verify that an explicitly approved task-specific test is executed.'
+    })
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $passingGateRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', (Get-RunRuntimeRelativePath $passingGateRunId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
-    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $passingGateRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $passingGateRunId 'plan.md'), '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $passingGateRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $passingGateRunId 'plan.md'), '-VerificationPath', $passingVerificationPath, '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $passingGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
     Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $passingGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
     $gateEvidence = Get-Content -LiteralPath (Get-RunRuntimePath $passingGateRunId 'gates.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($gateEvidence.runId -eq $passingGateRunId -and $gateEvidence.overall -eq 'PASS' -and $gateEvidence.modules[0].phases[4].commands[0].exitCode -eq 0 -and $gateEvidence.worktreeStable) -Message 'The deterministic gate runner derives PASS from the persisted run matrix and stable worktree fingerprints.'
+    Assert-True -Condition ($gateEvidence.runId -eq $passingGateRunId -and $gateEvidence.overall -eq 'PASS' -and @($gateEvidence.modules[0].phases[4].commands).Count -eq 2 -and $gateEvidence.modules[0].phases[4].commands[1].command -match 'run-specific' -and $gateEvidence.modules[0].phases[4].commands[1].exitCode -eq 0 -and $gateEvidence.worktreeStable) -Message 'The deterministic gate runner merges and executes approved run-specific verification with stable worktree fingerprints.'
+    $passingState = Get-Content -LiteralPath (Join-Path $repositoryRoot ".ai\runs\$passingGateRunId\state.json") -Raw | ConvertFrom-Json
+    Assert-True -Condition ($passingState.qualityPlan.verificationSha256 -eq $passingState.artifacts.verification.sha256 -and $passingState.artifacts.verification.verdict -eq 'PASS') -Message 'Plan approval canonicalizes and hashes the run-specific verification manifest.'
     $gateEvidenceHash = (Get-FileHash -LiteralPath (Get-RunRuntimePath $passingGateRunId 'gates.json') -Algorithm SHA256).Hash
     Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $passingGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
     Assert-True -Condition ((Get-FileHash -LiteralPath (Get-RunRuntimePath $passingGateRunId 'gates.json') -Algorithm SHA256).Hash -eq $gateEvidenceHash) -Message 'An unchanged deterministic gate request reuses current evidence rather than rerunning commands.'
@@ -275,8 +312,9 @@ Applies to `src/app`.
     $failingGateRunId = 'gate-fail-app'
     Set-Content -LiteralPath (Get-RunRuntimePath $failingGateRunId 'requirement.md') -Value 'Verify the failing quality-gate fixture.' -Encoding utf8
     Set-Content -LiteralPath (Get-RunRuntimePath $failingGateRunId 'plan.md') -Value 'Run the configured failing app quality matrix.' -Encoding utf8
+    $failingVerificationPath = Set-RunVerification -RunId $failingGateRunId
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $failingGateRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', (Get-RunRuntimeRelativePath $failingGateRunId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
-    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $failingGateRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $failingGateRunId 'plan.md'), '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $failingGateRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $failingGateRunId 'plan.md'), '-VerificationPath', $failingVerificationPath, '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $failingGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
     Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $failingGateRunId) -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
     $failedGateEvidence = Get-Content -LiteralPath (Get-RunRuntimePath $failingGateRunId 'gates.json') -Raw | ConvertFrom-Json
@@ -294,8 +332,9 @@ Applies to `src/app`.
     $rootGateRunId = 'gate-root-module'
     Set-Content -LiteralPath (Get-RunRuntimePath $rootGateRunId 'requirement.md') -Value 'Verify a root-level application module.' -Encoding utf8
     Set-Content -LiteralPath (Get-RunRuntimePath $rootGateRunId 'plan.md') -Value 'Run the root module quality matrix.' -Encoding utf8
+    $rootVerificationPath = Set-RunVerification -RunId $rootGateRunId
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $rootGateRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', (Get-RunRuntimeRelativePath $rootGateRunId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
-    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $rootGateRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $rootGateRunId 'plan.md'), '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $rootGateRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $rootGateRunId 'plan.md'), '-VerificationPath', $rootVerificationPath, '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $rootGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
     Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $rootGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
     $rootGateEvidence = Get-Content -LiteralPath (Get-RunRuntimePath $rootGateRunId 'gates.json') -Raw | ConvertFrom-Json
@@ -311,8 +350,9 @@ Applies to `src/app`.
     $matrixGateRunId = 'gate-exact-matrix'
     Set-Content -LiteralPath (Get-RunRuntimePath $matrixGateRunId 'requirement.md') -Value 'Verify that all approved modules are required.' -Encoding utf8
     Set-Content -LiteralPath (Get-RunRuntimePath $matrixGateRunId 'plan.md') -Value 'Run app and aux quality matrices.' -Encoding utf8
+    $matrixVerificationPath = Set-RunVerification -RunId $matrixGateRunId
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $matrixGateRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', (Get-RunRuntimeRelativePath $matrixGateRunId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
-    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $matrixGateRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $matrixGateRunId 'plan.md'), '-AffectedModules', 'app,aux') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $matrixGateRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $matrixGateRunId 'plan.md'), '-VerificationPath', $matrixVerificationPath, '-AffectedModules', 'app,aux') -WorkingDirectory $repositoryRoot | Out-Null
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $matrixGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
     Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $matrixGateRunId) -WorkingDirectory $repositoryRoot | Out-Null
     $partialGateEvidence = Get-Content -LiteralPath (Get-RunRuntimePath $matrixGateRunId 'gates.json') -Raw | ConvertFrom-Json -AsHashtable
@@ -440,7 +480,8 @@ Applies to `src/app`.
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $runId, '-WorkflowPath', 'fast-path', '-TaskType', 'QuickFix', '-ArtifactPath', (Get-RunRuntimeRelativePath $runId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
     $approvedPlan = 'Change src/app/app.js, add src/app/new.txt, and verify both files.'
     Set-Content -LiteralPath (Get-RunRuntimePath $runId 'plan.md') -Value $approvedPlan -Encoding utf8
-    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $runId, '-ArtifactPath', (Get-RunRuntimeRelativePath $runId 'plan.md'), '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    $quickVerificationPath = Set-RunVerification -RunId $runId
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $runId, '-ArtifactPath', (Get-RunRuntimeRelativePath $runId 'plan.md'), '-VerificationPath', $quickVerificationPath, '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
     $managedBranch = 'test/workflow-evidence'
     Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\create-branch.ps1') -Arguments @('-RunId', $runId, '-Name', $managedBranch) -WorkingDirectory $repositoryRoot | Out-Null
     $branchState = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Validate', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
@@ -462,6 +503,8 @@ Applies to `src/app`.
     $installedDeveloperPath = Join-Path $repositoryRoot '.opencode\agents\developer.md'
     $installedDeveloperBytes = [IO.File]::ReadAllBytes($installedDeveloperPath)
     Add-Content -LiteralPath $installedDeveloperPath -Value "`nunauthorized control-plane mutation"
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Validate', '-RunId', $runId) -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+    Assert-True -Condition $true -Message 'Explicit run validation rejects control-plane drift.'
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordGates', '-RunId', $runId, '-ArtifactPath', (Get-RunRuntimeRelativePath $runId 'gates.json'), '-Verdict', 'PASS') -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
     [IO.File]::WriteAllBytes($installedDeveloperPath, $installedDeveloperBytes)
     Assert-True -Condition $true -Message 'A control-plane mutation invalidates the run before gate evidence can advance state.'
@@ -617,8 +660,9 @@ exit 0
     $guardedCommitRunId = 'guarded-commit-script'
     Set-Content -LiteralPath (Get-RunRuntimePath $guardedCommitRunId 'requirement.md') -Value 'Verify the guarded commit script end to end.' -Encoding utf8
     Set-Content -LiteralPath (Get-RunRuntimePath $guardedCommitRunId 'plan.md') -Value 'Update the fixture value and create one validated conventional commit.' -Encoding utf8
+    $guardedCommitVerificationPath = Set-RunVerification -RunId $guardedCommitRunId
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $guardedCommitRunId, '-WorkflowPath', 'fast-path', '-TaskType', 'Test', '-ArtifactPath', (Get-RunRuntimeRelativePath $guardedCommitRunId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
-    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $guardedCommitRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $guardedCommitRunId 'plan.md'), '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $guardedCommitRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $guardedCommitRunId 'plan.md'), '-VerificationPath', $guardedCommitVerificationPath, '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $guardedCommitRunId) -WorkingDirectory $repositoryRoot | Out-Null
     Set-Content -LiteralPath (Join-Path $sourceRoot 'app.js') -Value 'export const value = "guarded-commit";' -Encoding utf8
     Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $guardedCommitRunId) -WorkingDirectory $repositoryRoot | Out-Null

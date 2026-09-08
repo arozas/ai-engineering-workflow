@@ -50,6 +50,7 @@ foreach ($required in @(
     'template\.ai\bootstrap-input.schema.json',
     'template\.ai\workflow-installation.schema.json',
     'template\.ai\workflow-run.schema.json',
+    'template\.ai\task-verification.schema.json',
     'template\.ai\quality-gates.schema.json',
     'template\.ai\review-evidence.schema.json',
     'template\.ai\branch-evidence.schema.json',
@@ -280,7 +281,7 @@ if ($quickReviewerAgentContent -match '(?ms)- action:\s*(workflow_state|workflow
 }
 $qualityRunnerContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\run-quality-gates.ps1') -Raw
 $workflowStateContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\workflow-state.ps1') -Raw
-foreach ($requiredRunnerToken in @('quality-gates.schema.json', 'startedWorktreeFingerprint', 'runnerSha256', 'configuredCommandCount', 'qualityPlanSha256', 'workflow-run.schema.json', 'RunId', '[switch]$Force', 'Invalid or stale runtime evidence is replaced')) {
+foreach ($requiredRunnerToken in @('quality-gates.schema.json', 'task-verification.schema.json', 'verificationSha256', 'startedWorktreeFingerprint', 'runnerSha256', 'configuredCommandCount', 'qualityPlanSha256', 'workflow-run.schema.json', 'RunId', '[switch]$Force', 'Invalid or stale runtime evidence is replaced')) {
     if ($qualityRunnerContent -notmatch [regex]::Escape($requiredRunnerToken)) {
         $errors += "Quality-gate runner is missing deterministic evidence field or check: $requiredRunnerToken."
     }
@@ -292,7 +293,7 @@ $runnerPreamble = $qualityRunnerContent.Substring(0, $qualityRunnerContent.Index
 if ($runnerPreamble -match '\$ModuleId') {
     $errors += 'Quality-gate runner must derive modules from persisted run state, not caller-selected ModuleId input.'
 }
-foreach ($requiredStateToken in @('Resolve-RunRuntimeArtifact', 'Get-ValidatedGateEvidence', 'Get-ValidatedReviewEvidence', 'Get-ValidatedBranchEvidence', 'Get-ValidatedCommitEvidence', 'Get-ValidatedPublishEvidence', 'Get-ValidatedPullRequestEvidence', 'ls-remote', 'ghCommand.Source pr view', 'Get-ControlPlaneFingerprint', 'Assert-ControlPlane', 'affectedModuleIds', 'matrixSha256', 'Quality-gate command mismatch', 'validate-commit-message.ps1')) {
+foreach ($requiredStateToken in @('Resolve-RunRuntimeArtifact', 'Get-TaskVerification', 'task-verification.schema.json', 'verificationSha256', 'Get-ValidatedGateEvidence', 'Get-ValidatedReviewEvidence', 'Get-ValidatedBranchEvidence', 'Get-ValidatedCommitEvidence', 'Get-ValidatedPublishEvidence', 'Get-ValidatedPullRequestEvidence', 'ls-remote', 'ghCommand.Source pr view', 'Get-ControlPlaneFingerprint', 'Assert-ControlPlane', 'affectedModuleIds', 'matrixSha256', 'Quality-gate command mismatch', 'validate-commit-message.ps1')) {
     if ($workflowStateContent -notmatch [regex]::Escape($requiredStateToken)) {
         $errors += "Workflow state is missing deterministic protection: $requiredStateToken."
     }

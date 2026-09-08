@@ -14,7 +14,7 @@ It converts tickets, specifications, written requirements, and unknown productio
 - Standard, fast-path, and production-diagnosis workflows.
 - Persisted, hash-verified run state under local `.ai/runs/` records, with isolated staging under `.ai/runtime/<run-id>/`.
 - An orchestrator plus specialized developer, tester, reviewer, diagnostician, quick-fix, delivery, bounded evidence-reader, and optional bootstrap-enricher agents.
-- Deterministic quality gates bound to the exact modules and commands approved in the plan.
+- Deterministic quality gates bound to the exact modules, configured commands, and hashed run-specific verification approved with the plan.
 - Reviewer-scoped structured evidence whose verdict is derived from findings and acceptance-criteria coverage.
 - Read-only Azure DevOps work-item integration.
 - Local-first installation that avoids workflow files in consumer commits by default.
@@ -126,13 +126,13 @@ requirement
    |
    +-- standard work --------------> /ticket
                                          |
-                                  proposed plan
+                         proposed plan + verification manifest
                                          |
                                   human approval
                                          |
                                implementation + tests
                                          |
-                          frozen deterministic quality matrix
+                       frozen merged deterministic quality matrix
                                          |
                                independent read-only review
                                          |
@@ -141,7 +141,7 @@ requirement
                          separately approved delivery operations
 ```
 
-The affected module IDs are persisted when the plan is approved. `workflow_next` returns a compact status and legal next actions for resumed runs. The quality runner accepts only a run ID, reuses unchanged current evidence, reconstructs the matrix, and rejects stale configuration, omitted modules, altered commands, mismatched evidence, or worktree/control-plane drift.
+The affected module IDs and `.ai/runtime/<run-id>/verification.json` are persisted when the plan is approved. The manifest is required even when empty and captures mandatory task-specific commands that do not yet exist in project configuration. `workflow_next` returns a compact status and legal next actions for resumed runs. The quality runner accepts only a run ID, reuses unchanged current evidence, reconstructs the configured-plus-run-specific matrix, and rejects stale configuration, altered manifests, omitted modules or commands, mismatched evidence, or worktree/control-plane drift.
 
 ## Documentation
 

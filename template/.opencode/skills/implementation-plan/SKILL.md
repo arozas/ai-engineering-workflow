@@ -11,11 +11,11 @@ compatibility: opencode-v2
 3. Affected modules, components, files, APIs, data, and dependencies.
 4. Proposed implementation steps in dependency order.
 5. Test plan by unit, integration, component, and e2e level as applicable.
-6. Exact quality-gate commands for affected modules.
+6. Exact configured quality commands plus every mandatory task-specific command absent from project configuration.
 7. Security, compatibility, concurrency, data, rollout, and operational risks.
 8. Non-goals and unchanged behavior.
 9. Expected changed files and approximate changed lines.
 10. Alternatives considered and why the proposed option fits existing conventions.
 11. Questions and assumptions.
 
-Every expected file must have a reason. Plans must be specific enough that the developer does not need to invent architecture. End with `WAITING FOR APPROVAL`; no production edit is allowed before explicit approval.
+Every expected file must have a reason. Plans must be specific enough that the developer does not need to invent architecture. Materialize the task-specific commands in `.ai/runtime/<run-id>/verification.json` using `.ai/task-verification.schema.json`; an empty command array is required when configured gates are sufficient. Every manifest command must appear in the plan and every mandatory plan command absent from `.ai/project.json` must appear in the manifest. End with `WAITING FOR APPROVAL`; no production edit is allowed before explicit approval of both artifacts.

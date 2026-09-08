@@ -9,7 +9,7 @@ The workflow prevents an agent from converting a plausible narrative into unauth
 - typed tools for automatically allowed deterministic operations;
 - persisted state and artifact hashes;
 - control-plane and worktree fingerprints;
-- an exact approved quality matrix;
+- an exact approved quality matrix, including hashed run-specific verification;
 - independent read-only review with reviewer-exclusive evidence capabilities;
 - separately approved delivery operations;
 - run-isolated staging and independently verified remote delivery evidence;
@@ -45,11 +45,11 @@ Application agents also have direct edit denials for these paths. The fingerprin
 
 ## Approved quality matrix
 
-At `ApprovePlan`, state verifies explicit affected module IDs and builds the canonical matrix of module ID, normalized path, six ordered phases, and commands. It persists the project SHA-256, matrix SHA-256, and module IDs.
+At `ApprovePlan`, state requires `.ai/runtime/<run-id>/verification.json`, validates its run ID, affected modules, phases, commands, duplicate protection, and delivery/mutation denylist, then copies it into canonical run storage. It builds the canonical matrix of module ID, normalized path, six ordered phases, configured commands, and approved task-specific commands. It persists the project SHA-256, verification SHA-256, matrix SHA-256, and module IDs.
 
 The runner accepts only `RunId`. It requires `IMPLEMENTING`, reconstructs the matrix, rejects stale state, accepts `.` as the repository root, and rejects escaping paths.
 
-Gate evidence requires run/project/runner/matrix identity plus fingerprints and results. Recording compares exact module count/order, IDs, paths, phase count/order/names, command count/order/text, derived statuses, hashes, and worktree/control-plane stability. Evidence omitting a module or substituting a harmless command is rejected even if schema-valid.
+Gate evidence requires run/project/verification/runner/matrix identity plus fingerprints and results. Recording compares exact module count/order, IDs, paths, phase count/order/names, command count/order/text, derived statuses, hashes, and worktree/control-plane stability. Evidence omitting a module, omitting a run-specific command, or substituting a harmless command is rejected even if schema-valid.
 
 All candidate artifacts use `.ai/runtime/<run-id>/<artifact>`. State rejects a correct filename supplied from another run or from the shared runtime root. This prevents concurrent sessions from replacing one another's pending evidence.
 
@@ -61,7 +61,7 @@ The recorder recomputes severity counts and the verdict from structured findings
 
 ## Quality command risks
 
-Configured commands are executable repository policy. Bootstrap cites their source and the user approves them. Typed gates prevent agent selection changes; they cannot make a malicious approved command safe.
+Configured commands are executable repository policy. Bootstrap cites their source and the user approves them. Run-specific commands are executable per-task policy and require explicit approval with the plan. Typed gates prevent agent selection changes; they cannot make a malicious approved command safe.
 
 Review command changes like CI scripts. Never configure deployment, production access, secret retrieval, remote mutation, history rewrite, or data repair. A command that changes delivery content fails worktree stability even when it exits zero.
 

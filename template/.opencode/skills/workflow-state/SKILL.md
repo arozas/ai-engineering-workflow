@@ -17,8 +17,8 @@ Use a lowercase run ID of 3-64 characters, for example `ticket-18427` or `quick-
 Use only the typed `workflow_state` tool:
 
 1. Choose a unique run ID, write the normalized request to `.ai/runtime/<run-id>/requirement.md`, then `Start` with `standard` or `fast-path`.
-2. Write the complete proposed plan to `.ai/runtime/<run-id>/plan.md`.
-3. Only after explicit user approval, call `ApprovePlan` with that exact file and every affected module ID. The script copies and hashes the plan and freezes the exact project and quality-command matrix.
+2. Write the complete proposed plan to `.ai/runtime/<run-id>/plan.md` and a schema-valid `.ai/runtime/<run-id>/verification.json`. The manifest lists mandatory run-specific commands not already configured for the affected modules and is empty when none are needed.
+3. Only after explicit user approval of both artifacts, call `ApprovePlan` with the exact plan, verification path, and every affected module ID. The script copies and hashes both artifacts and freezes the exact merged project plus run-specific quality-command matrix.
 4. If an approved feature branch is needed, have `delivery` invoke `create-branch.ps1` with the run ID and exact approved name. The script persists `branch.json` through `RecordBranch` while state remains `PLAN_APPROVED`. Then call `BeginImplementation` before production or test edits.
 5. Run `workflow_gate` with the run ID. It writes factual gate evidence to `.ai/runtime/<run-id>/gates.json`; then call `RecordGates` with `PASS` or `FAIL`.
 6. Pass the exact persisted requirement, plan, diff packet, and gates to the read-only reviewer. The reviewer must call its exclusive typed review tool, which writes `.ai/runtime/<run-id>/review.json` and atomically records the derived verdict. Orchestrators and implementation agents must not write or record review evidence.
