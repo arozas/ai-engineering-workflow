@@ -88,7 +88,7 @@ Profiling, schema validation, scope counts, Git fingerprints, command execution,
 
 ## Measuring instead of guessing
 
-`evaluations/benchmark.schema.json` defines comparable runs with workflow path, model profile, input/output tokens, cost, duration, corrections, result, and escaped defects. It also accepts operational loop indicators: tool calls, duplicate tool calls, subagent delegations, protocol violations, and whether the step limit was reached. Record the same representative scenario under standard and fast-path routes, then summarize:
+`evaluations/benchmark.schema.json` defines comparable runs with workflow path, model profile, input/output tokens, cost, duration, corrections, result, and escaped defects. It also accepts operational loop indicators: tool calls, duplicate tool calls, subagent delegations, protocol violations, and whether the step limit was reached. The summarizer separates model profiles and calculates savings only from matching scenario IDs present in both paths. Record the same representative scenario under standard and fast-path routes, then summarize:
 
 ```powershell
 pwsh -NoProfile -File .\scripts\summarize-evaluations.ps1 `

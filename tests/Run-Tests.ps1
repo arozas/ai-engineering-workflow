@@ -37,6 +37,15 @@ function Get-RunRuntimeRelativePath([string]$RunId, [string]$FileName) {
     return ".ai/runtime/$RunId/$FileName"
 }
 
+function Add-ManagedLocalExclude([string]$RelativePattern) {
+    $excludePath = @(& git -C $repositoryRoot rev-parse --path-format=absolute --git-path info/exclude)[0]
+    $excludeContent = Get-Content -LiteralPath $excludePath -Raw
+    if ($excludeContent -notmatch [regex]::Escape($RelativePattern)) {
+        $excludeContent = $excludeContent.Replace('# END ai-engineering-workflow', "$RelativePattern`n# END ai-engineering-workflow")
+        Set-Content -LiteralPath $excludePath -Value $excludeContent -Encoding utf8 -NoNewline
+    }
+}
+
 try {
     New-Item -ItemType Directory -Path $repositoryRoot -Force | Out-Null
     & git -C $repositoryRoot init -b main | Out-Null
@@ -60,7 +69,7 @@ try {
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-Mode', 'Local') | Out-Null
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local installation remains invisible to Git.'
     $metadata = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\workflow-installation.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($metadata.workflowVersion -eq '1.11.0') -Message 'Installed metadata records version 1.11.0.'
+    Assert-True -Condition ($metadata.workflowVersion -eq '1.12.0') -Message 'Installed metadata records version 1.12.0.'
 
     $profileScript = Join-Path $repositoryRoot '.ai\scripts\profile-project.ps1'
     $profileOutput = Invoke-PowerShell -ScriptPath $profileScript -Arguments @('-OutputPath', '.ai/project-profile.json') -WorkingDirectory $repositoryRoot
@@ -159,6 +168,23 @@ try {
     $bootstrapApply = Invoke-PowerShell -ScriptPath $bootstrapApplyScript -Arguments @() -WorkingDirectory $repositoryRoot
     Assert-True -Condition (($bootstrapApply -join "`n") -match 'PROJECT_VALID') -Message 'Approved durable bootstrap proposal applies and validates deterministically.'
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Durable bootstrap proposal and applied local context remain invisible to Git.'
+
+    $appliedRulesPath = Join-Path $repositoryRoot '.ai\project-rules.md'
+    $proposalRulesPath = Join-Path $bootstrapProposalRoot 'project-rules.md'
+    $projectValidatorPath = Join-Path $repositoryRoot '.ai\scripts\validate-project.ps1'
+    $appliedRulesBeforeFailure = Get-Content -LiteralPath $appliedRulesPath -Raw
+    $proposalRulesBeforeFailure = Get-Content -LiteralPath $proposalRulesPath -Raw
+    $validatorBeforeFailure = Get-Content -LiteralPath $projectValidatorPath -Raw
+    try {
+        Set-Content -LiteralPath $proposalRulesPath -Value '# Project rules - transaction candidate' -Encoding utf8
+        Set-Content -LiteralPath $projectValidatorPath -Value "Write-Error 'forced post-copy validation failure'`nexit 1" -Encoding utf8
+        Invoke-PowerShell -ScriptPath $bootstrapApplyScript -Arguments @() -ExpectedExitCode 1 -WorkingDirectory $repositoryRoot | Out-Null
+        Assert-True -Condition ((Get-Content -LiteralPath $appliedRulesPath -Raw) -eq $appliedRulesBeforeFailure) -Message 'Failed bootstrap application restores every previously applied managed destination.'
+    }
+    finally {
+        Set-Content -LiteralPath $projectValidatorPath -Value $validatorBeforeFailure -Encoding utf8 -NoNewline
+        Set-Content -LiteralPath $proposalRulesPath -Value $proposalRulesBeforeFailure -Encoding utf8 -NoNewline
+    }
 
     $projectSkillRoot = Join-Path $repositoryRoot '.opencode\skills\project-app'
     New-Item -ItemType Directory -Path $projectSkillRoot -Force | Out-Null
@@ -652,22 +678,62 @@ exit 0
     [ordered]@{
         version = 1
         suiteName = 'isolated-test'
-        scenarios = @([ordered]@{
-            id = 'fixture-change'
-            category = 'bugfix'
-            description = 'Fixture benchmark'
-            runs = @(
-                [ordered]@{ workflowPath = 'standard'; modelProfile = 'test'; inputTokens = 800; outputTokens = 200; costUsd = 1; durationSeconds = 20; correctionCycles = 1; toolCalls = 12; duplicateToolCalls = 2; subagentDelegations = 3; protocolViolations = 1; stepLimitReached = $false; result = 'PASS'; escapedDefects = 0 },
-                [ordered]@{ workflowPath = 'fast-path'; modelProfile = 'test'; inputTokens = 400; outputTokens = 100; costUsd = 0.5; durationSeconds = 10; correctionCycles = 0; toolCalls = 5; duplicateToolCalls = 0; subagentDelegations = 1; protocolViolations = 0; stepLimitReached = $false; result = 'PASS'; escapedDefects = 0 }
-            )
-        })
+        scenarios = @(
+            [ordered]@{
+                id = 'fixture-change'
+                category = 'bugfix'
+                description = 'Fixture benchmark'
+                runs = @(
+                    [ordered]@{ workflowPath = 'standard'; modelProfile = 'test'; inputTokens = 800; outputTokens = 200; costUsd = 1; durationSeconds = 20; correctionCycles = 1; toolCalls = 12; duplicateToolCalls = 2; subagentDelegations = 3; protocolViolations = 1; stepLimitReached = $false; result = 'PASS'; escapedDefects = 0 },
+                    [ordered]@{ workflowPath = 'fast-path'; modelProfile = 'test'; inputTokens = 400; outputTokens = 100; costUsd = 0.5; durationSeconds = 10; correctionCycles = 0; toolCalls = 5; duplicateToolCalls = 0; subagentDelegations = 1; protocolViolations = 0; stepLimitReached = $false; result = 'PASS'; escapedDefects = 0 },
+                    [ordered]@{ workflowPath = 'standard'; modelProfile = 'strong'; inputTokens = 900; outputTokens = 100; costUsd = 2; durationSeconds = 18; correctionCycles = 0; toolCalls = 10; duplicateToolCalls = 0; subagentDelegations = 2; protocolViolations = 0; stepLimitReached = $false; result = 'PASS'; escapedDefects = 0 },
+                    [ordered]@{ workflowPath = 'fast-path'; modelProfile = 'strong'; inputTokens = 800; outputTokens = 100; costUsd = 1.8; durationSeconds = 14; correctionCycles = 0; toolCalls = 7; duplicateToolCalls = 0; subagentDelegations = 1; protocolViolations = 0; stepLimitReached = $false; result = 'PASS'; escapedDefects = 0 }
+                )
+            },
+            [ordered]@{
+                id = 'standard-only-feature'
+                category = 'feature'
+                description = 'Unpaired standard run must not distort fast-path savings.'
+                runs = @(
+                    [ordered]@{ workflowPath = 'standard'; modelProfile = 'test'; inputTokens = 9900; outputTokens = 100; costUsd = 10; durationSeconds = 200; correctionCycles = 1; toolCalls = 30; duplicateToolCalls = 0; subagentDelegations = 4; protocolViolations = 0; stepLimitReached = $false; result = 'PASS'; escapedDefects = 0 }
+                )
+            }
+        )
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $benchmarkPath -Encoding utf8
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\summarize-evaluations.ps1') -Arguments @('-InputPath', $benchmarkPath, '-OutputPath', $benchmarkSummaryPath) | Out-Null
     $benchmarkSummary = Get-Content -LiteralPath $benchmarkSummaryPath -Raw
-    Assert-True -Condition ($benchmarkSummary -match '50% savings' -and $benchmarkSummary -match 'Duplicate calls' -and $benchmarkSummary -match 'Protocol violations') -Message 'Benchmark tooling compares token usage and loop indicators.'
+    Assert-True -Condition ($benchmarkSummary -match '50% savings' -and $benchmarkSummary -match 'Only identical scenario IDs within the same model profile' -and $benchmarkSummary -match '\| strong \| standard \|' -and $benchmarkSummary -match 'Duplicate calls' -and $benchmarkSummary -match 'Protocol violations') -Message 'Benchmark tooling separates model profiles and compares only paired scenarios without losing loop indicators.'
 
     $smokeSelfTestOutput = Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\smoke-opencode.ps1') -Arguments @('-SelfTest')
     Assert-True -Condition (($smokeSelfTestOutput -join "`n") -match 'OpenCode smoke helper self-test passed: 6 assertions\.') -Message 'OpenCode smoke helper parsers, Windows shim quoting, and typed-tool fallback are covered without starting the beta runtime.'
+
+    $retiredManagedPath = Join-Path $repositoryRoot '.opencode\agents\retired-fixture.md'
+    Add-ManagedLocalExclude -RelativePattern '/.opencode/agents/retired-fixture.md'
+    Set-Content -LiteralPath $retiredManagedPath -Value 'retired managed fixture' -Encoding utf8
+    $installationMetadataPath = Join-Path $repositoryRoot '.ai\workflow-installation.json'
+    $installationMetadata = Get-Content -LiteralPath $installationMetadataPath -Raw | ConvertFrom-Json
+    $installationMetadata.managedFiles = @($installationMetadata.managedFiles) + [pscustomobject]@{
+        path = '.opencode/agents/retired-fixture.md'
+        sha256 = (Get-FileHash -LiteralPath $retiredManagedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $installationMetadata | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $installationMetadataPath -Encoding utf8
+    Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\update.ps1') -Arguments @('-TargetPath', $repositoryRoot) | Out-Null
+    Assert-True -Condition (-not (Test-Path -LiteralPath $retiredManagedPath)) -Message 'Updater removes a retired managed file only when its content still matches installation metadata.'
+
+    Add-ManagedLocalExclude -RelativePattern '/.opencode/agents/retired-fixture.md'
+    Set-Content -LiteralPath $retiredManagedPath -Value 'original retired fixture' -Encoding utf8
+    $installationMetadata = Get-Content -LiteralPath $installationMetadataPath -Raw | ConvertFrom-Json
+    $installationMetadata.managedFiles = @($installationMetadata.managedFiles) + [pscustomobject]@{
+        path = '.opencode/agents/retired-fixture.md'
+        sha256 = (Get-FileHash -LiteralPath $retiredManagedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $installationMetadata | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $installationMetadataPath -Encoding utf8
+    Set-Content -LiteralPath $retiredManagedPath -Value 'locally modified retired fixture' -Encoding utf8
+    Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\update.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-DryRun') -ExpectedExitCode 1 | Out-Null
+    Assert-True -Condition (Test-Path -LiteralPath $retiredManagedPath) -Message 'Updater preserves and reports a retired managed file that was modified locally.'
+    Remove-Item -LiteralPath $retiredManagedPath -Force
+    $installationMetadata.managedFiles = @($installationMetadata.managedFiles | Where-Object path -ne '.opencode/agents/retired-fixture.md')
+    $installationMetadata | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $installationMetadataPath -Encoding utf8
 
     Add-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\developer.md') -Value "`nlocal customization"
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\update.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-DryRun') -ExpectedExitCode 1 | Out-Null

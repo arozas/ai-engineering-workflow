@@ -37,6 +37,8 @@ foreach ($required in @(
     'docs\extending-and-validation.md',
     'docs\troubleshooting.md',
     '.github\workflows\validate.yml',
+    '.github\workflows\opencode-v2-compatibility.yml',
+    'LICENSE',
     'evaluations\benchmark.schema.json',
     'evaluations\README.md',
     'evaluations\benchmark-suite-playbook.md',
@@ -327,7 +329,7 @@ foreach ($onboardingScript in @('scripts\install.ps1', 'scripts\new-project.ps1'
     }
 }
 $openCodeSmokeContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\smoke-opencode.ps1') -Raw
-foreach ($smokeToken in @('opencode2', 'AllowLegacyOpenCodeFallback', 'SelfTest', 'OpenCode smoke helper self-test passed', 'Get-WindowsCommandInvocation', 'Get-WorkflowToolNamesFromSource', 'Get-StaticMarkdownDefinitionNames', 'static definition fallback', 'static export fallback', '/api/health', '/global/health', '/api/agent', '/api/command', '/api/experimental/tool/ids', 'directory=', 'Authorization', '<redacted>', 'workflow_state', 'workflow_next', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_bootstrap_prepare', 'workflow_bootstrap_apply')) {
+foreach ($smokeToken in @('opencode2', 'AllowLegacyOpenCodeFallback', 'RequireRuntimeDiscovery', 'runtime discovery is required', 'SelfTest', 'OpenCode smoke helper self-test passed', 'Get-WindowsCommandInvocation', 'Get-WorkflowToolNamesFromSource', 'Get-StaticMarkdownDefinitionNames', 'static definition fallback', 'static export fallback', '/api/health', '/global/health', '/api/agent', '/api/command', '/api/experimental/tool/ids', 'directory=', 'Authorization', '<redacted>', 'workflow_state', 'workflow_next', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_bootstrap_prepare', 'workflow_bootstrap_apply')) {
     if ($openCodeSmokeContent -notmatch [regex]::Escape($smokeToken)) {
         $errors += "OpenCode smoke test is missing discovery check: $smokeToken."
     }
@@ -344,6 +346,33 @@ foreach ($ciToken in @('Validate distribution contracts', 'Run isolated workflow
 foreach ($ciToken in @('opencode-v2-smoke:', 'npm install --global', 'opencode2 --version', 'smoke-opencode.ps1')) {
     if ($ciContent -match [regex]::Escape($ciToken)) {
         $errors += "Required CI must not depend on OpenCode V2 beta smoke testing: $ciToken."
+    }
+}
+$compatibilityCiContent = Get-Content -LiteralPath (Join-Path $workflowRoot '.github\workflows\opencode-v2-compatibility.yml') -Raw
+foreach ($compatibilityToken in @('OPENCODE_V2_PINNED_PACKAGE', '@opencode-ai/cli@0.0.0-beta-', 'pinned-runtime-discovery:', 'RequireRuntimeDiscovery', 'latest-canary:', 'continue-on-error: true', '@opencode-ai/cli@beta')) {
+    if ($compatibilityCiContent -notmatch [regex]::Escape($compatibilityToken)) {
+        $errors += "OpenCode compatibility workflow is missing contract: $compatibilityToken."
+    }
+}
+
+$updateContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\update.ps1') -Raw
+foreach ($updateToken in @('retired managed file is locally modified', 'retired managed path is unsafe', 'Retired managed files safe to remove', 'Remove-Item -LiteralPath $retiredFile.Destination')) {
+    if ($updateContent -notmatch [regex]::Escape($updateToken)) {
+        $errors += "Updater is missing safe retired-file lifecycle contract: $updateToken."
+    }
+}
+
+$bootstrapApplyContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\apply-bootstrap-proposal.ps1') -Raw
+foreach ($transactionToken in @('ai-engineering-workflow-bootstrap-transaction-', 'transactionRecords', 'all managed destinations were restored', 'Copy-FileCreatingParent -Source $proposalProfilePath')) {
+    if ($bootstrapApplyContent -notmatch [regex]::Escape($transactionToken)) {
+        $errors += "Bootstrap apply is missing transactional contract: $transactionToken."
+    }
+}
+
+$evaluationSummaryContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\summarize-evaluations.ps1') -Raw
+foreach ($evaluationToken in @('Group-Object ModelProfile, WorkflowPath', 'Get-PairedComparisons', 'Only identical scenario IDs within the same model profile', 'PairedScenarios')) {
+    if ($evaluationSummaryContent -notmatch [regex]::Escape($evaluationToken)) {
+        $errors += "Evaluation summarizer is missing paired comparison contract: $evaluationToken."
     }
 }
 

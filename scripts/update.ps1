@@ -106,6 +106,30 @@ foreach ($entry in $newEntries) {
 }
 
 $stale = @($oldFiles.Keys | Where-Object { -not $newFiles.ContainsKey($_) } | Sort-Object)
+$retiredFiles = @()
+foreach ($relativePath in $stale) {
+    if ([IO.Path]::IsPathRooted($relativePath) -or $relativePath -match '(?:^|[\\/])\.\.(?:[\\/]|$)') {
+        $conflicts += "$relativePath (retired managed path is unsafe)"
+        continue
+    }
+
+    $destination = [IO.Path]::GetFullPath((Join-Path $targetRoot (ConvertTo-NativeRelativePath -RelativePath $relativePath)))
+    if ($destination -ne $targetRoot -and
+        -not $destination.StartsWith($targetRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        $conflicts += "$relativePath (retired managed path escapes the target)"
+        continue
+    }
+    if (-not (Test-Path -LiteralPath $destination)) { continue }
+    if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) {
+        $conflicts += "$relativePath (retired managed path is not a file)"
+        continue
+    }
+    if ((Get-FileSha256 -Path $destination) -ne $oldFiles[$relativePath]) {
+        $conflicts += "$relativePath (retired managed file is locally modified)"
+        continue
+    }
+    $retiredFiles += [pscustomobject]@{ Path = $relativePath; Destination = $destination }
+}
 $gitRepository = $null
 $excludePatterns = @()
 $localPaths = @()
@@ -121,16 +145,7 @@ if ($requestedMode -eq 'Local' -or $installedMode -eq 'local') {
 
 if ($requestedMode -eq 'Local') {
     $currentPatterns = @(Get-LocalExcludePatterns -ManagedFiles $newEntries -ShareProjectContext $requestedShareProjectContext)
-    $legacyLocalPaths = if ([int]$metadata.schemaVersion -eq 2 -and $metadata.PSObject.Properties.Name -contains 'localExcludedPaths') {
-        @($metadata.localExcludedPaths | ForEach-Object { [string]$_ })
-    }
-    else {
-        @($oldFiles.Keys)
-    }
-    $localPaths = @(
-        @($currentPatterns | ForEach-Object { $_.TrimStart('/') })
-        $legacyLocalPaths
-    ) | Sort-Object -Unique
+    $localPaths = @($currentPatterns | ForEach-Object { $_.TrimStart('/') }) | Sort-Object -Unique
     if ($requestedShareProjectContext) {
         $localPaths = @($localPaths | Where-Object { $_ -notin @('.ai/project-rules.md', '.ai/project.json') })
     }
@@ -150,7 +165,7 @@ Write-Host "Requested mode: $requestedMode"
 Write-Host "Share project context: $requestedShareProjectContext"
 Write-Host "Files to add or update: $($changes.Count)"
 Write-Host "Locally customized mutable files preserved: $($preserved.Count)"
-Write-Host "Retired files kept in target: $($stale.Count)"
+Write-Host "Retired managed files to remove: $($retiredFiles.Count)"
 
 if ($conflicts.Count -gt 0) {
     Write-Host 'Conflicts:'
@@ -158,9 +173,9 @@ if ($conflicts.Count -gt 0) {
     throw 'Update aborted before copying; resolve conflicts or preserve the current installation.'
 }
 
-if ($stale.Count -gt 0) {
-    Write-Host 'Retired template paths left untouched:'
-    $stale | ForEach-Object { Write-Host "  - $_" }
+if ($retiredFiles.Count -gt 0) {
+    Write-Host 'Retired managed files safe to remove:'
+    $retiredFiles.Path | ForEach-Object { Write-Host "  - $_" }
 }
 
 if ($preserved.Count -gt 0) {
@@ -185,6 +200,9 @@ foreach ($entry in $newEntries) {
         New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
     }
     Copy-Item -LiteralPath $entry.Source -Destination $destination -Force
+}
+foreach ($retiredFile in $retiredFiles) {
+    Remove-Item -LiteralPath $retiredFile.Destination -Force
 }
 
 if ($requestedMode -eq 'Local') {

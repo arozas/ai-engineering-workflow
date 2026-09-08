@@ -84,6 +84,8 @@ pwsh -NoProfile -File .\scripts\update.ps1 `
 
 The updater compares current managed files with the hashes recorded at installation. If a managed file was edited locally, it stops instead of overwriting the customization. Resolve the conflict by deciding whether to keep the local change, move it into supported project context, or accept the distribution version through a separately reviewed change.
 
+Files removed from a newer distribution are deleted only when their current hash still matches the previous installation metadata. A locally modified retired file blocks the update and is never deleted automatically. Successful Local-mode updates also remove retired paths from the managed Git exclude block, preventing obsolete hidden agents, commands, skills, or scripts from remaining active.
+
 After a control-plane update, start new workflow runs. Existing runs retain fingerprints of the previous policy and correctly refuse to advance.
 
 ## Creating a project from a preset
@@ -133,5 +135,7 @@ Presets are starting points, not evidence about an existing repository. Existing
 8. Wait for `PROJECT_VALID` before using `/ticket`, `/diagnose`, or `/ai-refresh`.
 
 The bootstrap proposal is a draft only and is excluded from Local-mode application commits. Rerunning `/ai-bootstrap` with the same structural fingerprint validates and preserves the existing draft. If the repository fingerprint changed, bootstrap stops with `BOOTSTRAP_PROPOSAL_STALE`; correct or apply the draft deliberately, or use `/ai-bootstrap --force` to replace it. Approval applies to the draft files under `.ai/bootstrap-proposal/`; repository drift between proposal and persistence blocks the write.
+
+Application is transactional across the project profile, project configuration, project rules, generated-skills manifest, and proposed generated skills. Existing destinations are backed up before replacement; any copy or final validation failure restores the previous files and reports that rollback occurred.
 
 Every later workflow run stages its candidate artifacts under `.ai/runtime/<run-id>/`; concurrent OpenCode sessions must keep and pass their exact run IDs. Local mode excludes both runtime staging and canonical `.ai/runs/<run-id>/` evidence from application commits.

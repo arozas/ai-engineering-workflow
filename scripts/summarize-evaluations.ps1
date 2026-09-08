@@ -49,10 +49,11 @@ $records = @(
 if ($records.Count -eq 0) { throw 'Benchmark contains no runs.' }
 
 $summary = @(
-    foreach ($group in $records | Group-Object WorkflowPath | Sort-Object Name) {
+    foreach ($group in $records | Group-Object ModelProfile, WorkflowPath | Sort-Object Name) {
         $items = @($group.Group)
         [pscustomobject]@{
-            WorkflowPath = $group.Name
+            ModelProfile = [string]$items[0].ModelProfile
+            WorkflowPath = [string]$items[0].WorkflowPath
             Runs = $items.Count
             AverageTokens = [Math]::Round(($items.TotalTokens | Measure-Object -Average).Average, 0)
             AverageCostUsd = [Math]::Round(($items.CostUsd | Measure-Object -Average).Average, 4)
@@ -69,23 +70,81 @@ $summary = @(
     }
 )
 
+function Get-PairedComparisons {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Records,
+        [Parameter(Mandatory = $true)][string]$BaselinePath,
+        [Parameter(Mandatory = $true)][string]$CandidatePath
+    )
+
+    $comparisons = @()
+    foreach ($modelProfile in @($Records.ModelProfile | Sort-Object -Unique)) {
+        $profileRecords = @($Records | Where-Object ModelProfile -eq $modelProfile)
+        $baselineIds = @($profileRecords | Where-Object WorkflowPath -eq $BaselinePath | ForEach-Object Scenario | Sort-Object -Unique)
+        $candidateIds = @($profileRecords | Where-Object WorkflowPath -eq $CandidatePath | ForEach-Object Scenario | Sort-Object -Unique)
+        $pairedIds = @($baselineIds | Where-Object { $candidateIds -contains $_ })
+        if ($pairedIds.Count -eq 0) { continue }
+
+        $baselineTokens = @()
+        $candidateTokens = @()
+        $baselineCosts = @()
+        $candidateCosts = @()
+        foreach ($scenarioId in $pairedIds) {
+            $baselineRuns = @($profileRecords | Where-Object { $_.Scenario -eq $scenarioId -and $_.WorkflowPath -eq $BaselinePath })
+            $candidateRuns = @($profileRecords | Where-Object { $_.Scenario -eq $scenarioId -and $_.WorkflowPath -eq $CandidatePath })
+            $baselineTokens += [double](($baselineRuns.TotalTokens | Measure-Object -Average).Average)
+            $candidateTokens += [double](($candidateRuns.TotalTokens | Measure-Object -Average).Average)
+            $baselineCosts += [double](($baselineRuns.CostUsd | Measure-Object -Average).Average)
+            $candidateCosts += [double](($candidateRuns.CostUsd | Measure-Object -Average).Average)
+        }
+
+        $baselineAverageTokens = [double](($baselineTokens | Measure-Object -Average).Average)
+        $candidateAverageTokens = [double](($candidateTokens | Measure-Object -Average).Average)
+        $comparisons += [pscustomobject]@{
+            ModelProfile = $modelProfile
+            BaselinePath = $BaselinePath
+            CandidatePath = $CandidatePath
+            PairedScenarios = $pairedIds.Count
+            BaselineAverageTokens = [Math]::Round($baselineAverageTokens, 0)
+            CandidateAverageTokens = [Math]::Round($candidateAverageTokens, 0)
+            TokenSavingsPercent = if ($baselineAverageTokens -gt 0) { [Math]::Round((1 - ($candidateAverageTokens / $baselineAverageTokens)) * 100, 1) } else { $null }
+            BaselineAverageCostUsd = [Math]::Round((($baselineCosts | Measure-Object -Average).Average), 4)
+            CandidateAverageCostUsd = [Math]::Round((($candidateCosts | Measure-Object -Average).Average), 4)
+        }
+    }
+    return @($comparisons)
+}
+
 $lines = @(
     "# Benchmark summary: $($benchmark.suiteName)",
     '',
     "Runs: $($records.Count)",
     '',
-    '| Workflow path | Runs | Avg. tokens | Avg. cost USD | Avg. seconds | Avg. corrections | Avg. tool calls | Avg. delegations | Duplicate calls | Protocol violations | Step-limit runs | Success rate | Escaped defects |',
-    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
+    '| Model profile | Workflow path | Runs | Avg. tokens | Avg. cost USD | Avg. seconds | Avg. corrections | Avg. tool calls | Avg. delegations | Duplicate calls | Protocol violations | Step-limit runs | Success rate | Escaped defects |',
+    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
 )
 foreach ($row in $summary) {
-    $lines += "| $($row.WorkflowPath) | $($row.Runs) | $($row.AverageTokens) | $($row.AverageCostUsd) | $($row.AverageDurationSeconds) | $($row.AverageCorrections) | $($row.AverageToolCalls) | $($row.AverageDelegations) | $($row.DuplicateToolCalls) | $($row.ProtocolViolations) | $($row.StepLimitRuns) | $($row.SuccessRatePercent)% | $($row.EscapedDefects) |"
+    $lines += "| $($row.ModelProfile) | $($row.WorkflowPath) | $($row.Runs) | $($row.AverageTokens) | $($row.AverageCostUsd) | $($row.AverageDurationSeconds) | $($row.AverageCorrections) | $($row.AverageToolCalls) | $($row.AverageDelegations) | $($row.DuplicateToolCalls) | $($row.ProtocolViolations) | $($row.StepLimitRuns) | $($row.SuccessRatePercent)% | $($row.EscapedDefects) |"
 }
 
-$standard = $summary | Where-Object WorkflowPath -eq 'standard' | Select-Object -First 1
-$fast = $summary | Where-Object WorkflowPath -eq 'fast-path' | Select-Object -First 1
-if ($null -ne $standard -and $null -ne $fast -and $standard.AverageTokens -gt 0) {
-    $savings = [Math]::Round((1 - ($fast.AverageTokens / $standard.AverageTokens)) * 100, 1)
-    $lines += @('', "Fast-path average token change versus standard: $savings% savings.")
+$pairedComparisons = @(
+    @(Get-PairedComparisons -Records $records -BaselinePath 'manual' -CandidatePath 'standard')
+    @(Get-PairedComparisons -Records $records -BaselinePath 'standard' -CandidatePath 'fast-path')
+)
+if ($pairedComparisons.Count -gt 0) {
+    $lines += @(
+        '',
+        '## Paired token comparisons',
+        '',
+        'Only identical scenario IDs within the same model profile are compared. Unpaired runs remain in the summary above but never influence these savings.',
+        '',
+        '| Model profile | Comparison | Paired scenarios | Baseline avg. tokens | Candidate avg. tokens | Token change | Baseline avg. cost USD | Candidate avg. cost USD |',
+        '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |'
+    )
+    foreach ($comparison in $pairedComparisons) {
+        $tokenChange = if ($null -eq $comparison.TokenSavingsPercent) { 'not comparable' } else { "$($comparison.TokenSavingsPercent)% savings" }
+        $lines += "| $($comparison.ModelProfile) | $($comparison.CandidatePath) vs $($comparison.BaselinePath) | $($comparison.PairedScenarios) | $($comparison.BaselineAverageTokens) | $($comparison.CandidateAverageTokens) | $tokenChange | $($comparison.BaselineAverageCostUsd) | $($comparison.CandidateAverageCostUsd) |"
+    }
 }
 
 $result = $lines -join [Environment]::NewLine

@@ -49,7 +49,16 @@ function Copy-FileCreatingParent {
     if (-not (Test-Path -LiteralPath $destinationDirectory -PathType Container)) {
         New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
     }
-    Copy-Item -LiteralPath $Source -Destination $Destination -Force
+    $temporaryDestination = $Destination + '.tmp.' + [Guid]::NewGuid().ToString('N')
+    try {
+        Copy-Item -LiteralPath $Source -Destination $temporaryDestination -Force
+        Move-Item -LiteralPath $temporaryDestination -Destination $Destination -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryDestination) {
+            Remove-Item -LiteralPath $temporaryDestination -Force
+        }
+    }
 }
 
 function Test-JsonFile {
@@ -172,6 +181,24 @@ foreach ($module in @($project.modules)) {
         if (-not (Test-Path -LiteralPath $builtInSkillPath -PathType Leaf)) {
             $errors += "Module '$moduleId' references missing built-in context skill '$skillName'."
         }
+        else {
+            $builtInSkillContent = Get-Content -LiteralPath $builtInSkillPath -Raw
+            if ($builtInSkillContent -notmatch ('(?m)^name:\s*' + [regex]::Escape($skillName) + '\s*$')) {
+                $errors += "Context skill '$skillName' frontmatter name does not match its directory."
+            }
+        }
+    }
+}
+
+if ($project.PSObject.Properties.Name -contains 'diagnostics') {
+    $unsafeDiagnosticCommandPattern = '(?i)(?:^|\s)(?:git\s+(?:add|commit|push|merge|rebase|reset|clean|tag|branch|switch|checkout)|gh\s+(?:pr\s+(?:create|edit|ready|merge)|release|secret|variable|workflow\s+run)|kubectl\s+(?:apply|delete|patch|scale|rollout|exec|cp)|terraform\s+(?:apply|destroy|import|taint|untaint)|az\s+deployment)(?:\s|$)'
+    foreach ($command in @($project.diagnostics.commands)) {
+        if ([string]$command -match '[\r\n]') {
+            $errors += 'diagnostics.commands contains a multiline command.'
+        }
+        if ([string]$command -match $unsafeDiagnosticCommandPattern) {
+            $errors += "diagnostics.commands contains a delivery or mutation command: $command"
+        }
     }
 }
 
@@ -238,24 +265,62 @@ if ($DryRun) {
     exit 0
 }
 
-& $profilerPath -OutputPath '.ai/project-profile.json' | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw 'Unable to persist the approved project profile.'
-}
+$transactionRoot = Join-Path ([IO.Path]::GetTempPath()) ('ai-engineering-workflow-bootstrap-transaction-' + [Guid]::NewGuid().ToString('N'))
+$transactionRecords = @()
+try {
+    New-Item -ItemType Directory -Path $transactionRoot -Force | Out-Null
+    $transactionPaths = @($filesToApply | Sort-Object -Unique)
+    for ($index = 0; $index -lt $transactionPaths.Count; $index++) {
+        $relativePath = [string]$transactionPaths[$index]
+        $destination = Resolve-RepositoryPath -Path $relativePath -Description "Bootstrap destination '$relativePath'"
+        $existed = Test-Path -LiteralPath $destination -PathType Leaf
+        $backupPath = Join-Path $transactionRoot ("$index.bak")
+        if ($existed) { Copy-Item -LiteralPath $destination -Destination $backupPath -Force }
+        $transactionRecords += [pscustomobject]@{
+            Destination = $destination
+            Existed = $existed
+            BackupPath = $backupPath
+        }
+    }
 
-Copy-FileCreatingParent -Source $proposalProjectPath -Destination (Resolve-RepositoryPath -Path '.ai/project.json' -Description 'Project configuration destination')
-Copy-FileCreatingParent -Source $proposalRulesPath -Destination (Resolve-RepositoryPath -Path '.ai/project-rules.md' -Description 'Project rules destination')
-Copy-FileCreatingParent -Source $proposalGeneratedSkillsPath -Destination (Resolve-RepositoryPath -Path '.ai/generated-skills.json' -Description 'Generated skills destination')
-foreach ($record in @($generatedSkills.skills)) {
-    $id = [string]$record.id
-    $source = Resolve-RepositoryPath -Path ".ai/bootstrap-proposal/skills/$id/SKILL.md" -Description "Proposed generated skill '$id'" -RequireFile
-    $destination = Resolve-RepositoryPath -Path ([string]$record.path) -Description "Generated skill '$id' destination"
-    Copy-FileCreatingParent -Source $source -Destination $destination
-}
+    Copy-FileCreatingParent -Source $proposalProfilePath -Destination (Resolve-RepositoryPath -Path '.ai/project-profile.json' -Description 'Project profile destination')
+    Copy-FileCreatingParent -Source $proposalProjectPath -Destination (Resolve-RepositoryPath -Path '.ai/project.json' -Description 'Project configuration destination')
+    Copy-FileCreatingParent -Source $proposalRulesPath -Destination (Resolve-RepositoryPath -Path '.ai/project-rules.md' -Description 'Project rules destination')
+    Copy-FileCreatingParent -Source $proposalGeneratedSkillsPath -Destination (Resolve-RepositoryPath -Path '.ai/generated-skills.json' -Description 'Generated skills destination')
+    foreach ($record in @($generatedSkills.skills)) {
+        $id = [string]$record.id
+        $source = Resolve-RepositoryPath -Path ".ai/bootstrap-proposal/skills/$id/SKILL.md" -Description "Proposed generated skill '$id'" -RequireFile
+        $destination = Resolve-RepositoryPath -Path ([string]$record.path) -Description "Generated skill '$id' destination"
+        Copy-FileCreatingParent -Source $source -Destination $destination
+    }
 
-$validationOutput = @(& $validatorPath)
-if ($LASTEXITCODE -ne 0) {
-    throw "Applied bootstrap proposal failed project validation.`n$($validationOutput -join "`n")"
+    $validationOutput = @(& $validatorPath)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Applied bootstrap proposal failed project validation.`n$($validationOutput -join "`n")"
+    }
+}
+catch {
+    $applyFailure = $_
+    foreach ($record in @($transactionRecords)) {
+        if ($record.Existed) {
+            Copy-FileCreatingParent -Source $record.BackupPath -Destination $record.Destination
+        }
+        elseif (Test-Path -LiteralPath $record.Destination -PathType Leaf) {
+            Remove-Item -LiteralPath $record.Destination -Force
+        }
+    }
+    throw "Bootstrap proposal application failed and all managed destinations were restored. $($applyFailure.Exception.Message)"
+}
+finally {
+    if (Test-Path -LiteralPath $transactionRoot) {
+        $resolvedTransactionRoot = [IO.Path]::GetFullPath($transactionRoot)
+        $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+        if (-not $resolvedTransactionRoot.StartsWith($temporaryRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            -not ([IO.Path]::GetFileName($resolvedTransactionRoot)).StartsWith('ai-engineering-workflow-bootstrap-transaction-', [StringComparison]::Ordinal)) {
+            throw "Unsafe bootstrap transaction cleanup target: $resolvedTransactionRoot"
+        }
+        Remove-Item -LiteralPath $resolvedTransactionRoot -Recurse -Force
+    }
 }
 
 $validation = ($validationOutput -join "`n") | ConvertFrom-Json

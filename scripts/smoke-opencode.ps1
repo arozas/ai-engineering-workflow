@@ -2,6 +2,7 @@
 param(
     [ValidateRange(10, 180)][int]$StartupTimeoutSeconds = 90,
     [switch]$AllowLegacyOpenCodeFallback,
+    [switch]$RequireRuntimeDiscovery,
     [switch]$SelfTest
 )
 
@@ -340,9 +341,10 @@ function Stop-OpenCodeServer {
     if ($isWindowsPlatform) {
         $taskkillCommand = Get-Command taskkill.exe -ErrorAction SilentlyContinue
         if ($null -ne $taskkillCommand) {
-            & $taskkillCommand.Source /PID $ServerProcess.Id /T /F | Out-Null
+            & $taskkillCommand.Source /PID $ServerProcess.Id /T /F 2>&1 | Out-Null
             $ServerProcess.WaitForExit(5000) | Out-Null
-            return
+            $ServerProcess.Refresh()
+            if ($ServerProcess.HasExited) { return }
         }
     }
 
@@ -418,7 +420,7 @@ try {
     $baseUrl = "http://127.0.0.1:$port"
     $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     $healthy = $false
-    $healthPaths = @('/api/health', '/global/health')
+    $healthPaths = @('/global/health', '/api/health')
     $healthErrors = @()
     while ([DateTime]::UtcNow -lt $deadline) {
         if ($process.HasExited) { break }
@@ -439,12 +441,21 @@ try {
         throw "OpenCode server did not become healthy. $(Get-OpenCodeServerFailureDetails -ServerProcess $process -HealthErrors $healthErrors)"
     }
 
-    $agents = Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/api/agent', '/agent') -Description 'agents' -Directory $consumerRoot
-    $commands = Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/api/command', '/command') -Description 'commands' -Directory $consumerRoot
+    $expectedAgents = @('orchestrator', 'developer', 'reviewer', 'tester', 'delivery', 'diagnostician', 'quick-fix', 'quick-reviewer', 'bootstrap-enricher', 'evidence-reader')
+    $expectedCommands = @('ai-bootstrap', 'ai-bootstrap-apply', 'ai-bootstrap-enhance', 'ai-refresh', 'branch', 'commit', 'delivery-check', 'diagnose', 'explain', 'implement', 'pr', 'pr-create', 'publish', 'quick-fix', 'review', 'run-status', 'small-task', 'test', 'ticket')
+    $expectedTools = @('workflow_state', 'workflow_next', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_fast_path', 'workflow_validate_project', 'workflow_profile_project', 'workflow_bootstrap_prepare', 'workflow_bootstrap_apply', 'workflow_validate_diagnosis', 'workflow_delivery_check')
+
+    $agents = Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/agent', '/api/agent') -Description 'agents' -Directory $consumerRoot
+    $commands = Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/command', '/api/command') -Description 'commands' -Directory $consumerRoot
     $toolDiscovery = 'runtime endpoint'
     try {
-        $toolIds = @(Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/api/experimental/tool/ids', '/experimental/tool/ids') -Description 'typed tool IDs' -Directory $consumerRoot)
+        $toolIds = @(Invoke-OpenCodeEndpoint -BaseUrl $baseUrl -Paths @('/experimental/tool/ids', '/api/experimental/tool/ids') -Description 'typed tool IDs' -Directory $consumerRoot)
         $toolNames = Get-DefinitionNames -Definitions $toolIds
+        if (@($expectedTools | Where-Object { $toolNames -notcontains $_ }).Count -gt 0) {
+            $toolSourcePath = Join-Path $consumerRoot '.opencode\tools\workflow.ts'
+            $toolNames = @(Get-WorkflowToolNamesFromSource -Source (Get-Content -LiteralPath $toolSourcePath -Raw))
+            $toolDiscovery = 'static export fallback because this OpenCode V2 beta returned an incomplete typed-tool payload'
+        }
     }
     catch {
         $toolSourcePath = Join-Path $consumerRoot '.opencode\tools\workflow.ts'
@@ -454,18 +465,19 @@ try {
     $agentNames = Get-DefinitionNames -Definitions $agents
     $commandNames = Get-DefinitionNames -Definitions $commands
 
-    $expectedAgents = @('orchestrator', 'developer', 'reviewer', 'tester', 'delivery', 'diagnostician', 'quick-fix', 'quick-reviewer', 'bootstrap-enricher', 'evidence-reader')
-    $expectedCommands = @('ai-bootstrap', 'ai-bootstrap-apply', 'ai-bootstrap-enhance', 'ai-refresh', 'branch', 'commit', 'delivery-check', 'diagnose', 'explain', 'implement', 'pr', 'pr-create', 'publish', 'quick-fix', 'review', 'run-status', 'small-task', 'test', 'ticket')
-    $expectedTools = @('workflow_state', 'workflow_next', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_fast_path', 'workflow_validate_project', 'workflow_profile_project', 'workflow_bootstrap_prepare', 'workflow_bootstrap_apply', 'workflow_validate_diagnosis', 'workflow_delivery_check')
     $agentDiscovery = 'runtime endpoint'
     $commandDiscovery = 'runtime endpoint'
-    if (@($expectedAgents | Where-Object { $agentNames -contains $_ }).Count -eq 0) {
+    if (@($expectedAgents | Where-Object { $agentNames -notcontains $_ }).Count -gt 0) {
         $agentNames = @(Get-StaticMarkdownDefinitionNames -RootPath (Join-Path $consumerRoot '.opencode\agents'))
-        $agentDiscovery = 'static definition fallback because this OpenCode V2 beta returned an empty agent payload'
+        $agentDiscovery = 'static definition fallback because this OpenCode V2 beta returned an incomplete agent payload'
     }
-    if (@($expectedCommands | Where-Object { $commandNames -contains $_ }).Count -eq 0) {
+    if (@($expectedCommands | Where-Object { $commandNames -notcontains $_ }).Count -gt 0) {
         $commandNames = @(Get-StaticMarkdownDefinitionNames -RootPath (Join-Path $consumerRoot '.opencode\commands'))
-        $commandDiscovery = 'static definition fallback because this OpenCode V2 beta returned an empty command payload'
+        $commandDiscovery = 'static definition fallback because this OpenCode V2 beta returned an incomplete command payload'
+    }
+    $fallbackDiscoveries = @($agentDiscovery, $commandDiscovery, $toolDiscovery) | Where-Object { $_ -ne 'runtime endpoint' }
+    if ($RequireRuntimeDiscovery -and @($fallbackDiscoveries).Count -gt 0) {
+        throw "OpenCode runtime discovery is required, but at least one definition class needed a static fallback. Agents: $agentDiscovery. Commands: $commandDiscovery. Tools: $toolDiscovery."
     }
     $missingAgents = @($expectedAgents | Where-Object { $agentNames -notcontains $_ })
     $missingCommands = @($expectedCommands | Where-Object { $commandNames -notcontains $_ })

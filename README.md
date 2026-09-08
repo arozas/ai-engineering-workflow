@@ -70,7 +70,7 @@ Bootstrap profiles the project deterministically, writes an editable draft plus 
 /ai-bootstrap-apply
 ```
 
-The apply step validates the draft, checks for repository drift, writes the approved project context, and requires `PROJECT_VALID`.
+The apply step validates the draft, checks for repository drift, transactionally writes the approved project context, and requires `PROJECT_VALID`. A post-write validation failure restores every previous managed destination.
 
 ## Create a new project
 
@@ -164,7 +164,7 @@ pwsh -NoProfile -File .\tests\Run-Tests.ps1
 pwsh -NoProfile -File .\scripts\smoke-opencode.ps1
 ```
 
-The first two commands require Git and PowerShell and form the required CI gate. The smoke test additionally requires the OpenCode V2 CLI package (`@opencode-ai/cli@beta`) and the V2 executable (`opencode2`) because this template uses OpenCode V2 permissions. It starts a local model-free server and prefers runtime agent, command, and typed-tool discovery. Some V2 preview builds return empty discovery payloads or omit the tool endpoint; in those cases the success message names the static definition/export fallback instead of presenting it as runtime discovery. The smoke test is intentionally manual while OpenCode V2 is beta; required CI remains deterministic and independent of beta runtime drift. The isolated suite also proves run-level staging, reviewer, branch, commit, remote publish, and draft-PR evidence binding.
+The first two commands require Git and PowerShell and form the required CI gate. The smoke test additionally requires the OpenCode V2 CLI package (`@opencode-ai/cli@beta`) and the V2 executable (`opencode2`) because this template uses OpenCode V2 permissions. It starts a local model-free server and prefers runtime agent, command, and typed-tool discovery. Some V2 preview builds return empty discovery payloads or omit the tool endpoint; the default local smoke names a static fallback instead of presenting it as runtime discovery. `-RequireRuntimeDiscovery` rejects every fallback. A separate compatibility workflow runs strict mode against an exact pinned package for manual/tag checks and probes the latest beta in a non-blocking scheduled canary. The isolated suite also proves run-level staging, reviewer, branch, commit, remote publish, and draft-PR evidence binding.
 
 ## OpenCode references
 
@@ -179,4 +179,4 @@ The first two commands require Git and PowerShell and form the required CI gate.
 
 ## License
 
-See the repository license for reuse terms.
+Released under the [MIT License](LICENSE).

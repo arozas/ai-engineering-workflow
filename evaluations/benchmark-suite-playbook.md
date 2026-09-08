@@ -79,4 +79,4 @@ pwsh -NoProfile -File .\scripts\summarize-evaluations.ps1 `
   -OutputPath "C:\Measurements\workflow-benchmark-summary.md"
 ```
 
-Interpret token savings only beside success rate and escaped defects. A cheaper path that lowers acceptance quality is not an improvement.
+Interpret token savings only beside success rate and escaped defects. The summarizer compares paths by identical scenario ID and model profile, so unmatched standard-only features cannot distort fast-path savings and economical/strong model runs remain separate. A cheaper path that lowers acceptance quality is not an improvement.

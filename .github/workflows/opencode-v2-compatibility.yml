@@ -1,0 +1,68 @@
+name: OpenCode V2 compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+env:
+  OPENCODE_V2_PINNED_PACKAGE: "@opencode-ai/cli@0.0.0-beta-19271"
+  OPENCODE_V2_CANARY_PACKAGE: "@opencode-ai/cli@beta"
+
+jobs:
+  pinned-runtime-discovery:
+    if: github.event_name != 'schedule'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install pinned OpenCode V2
+        shell: pwsh
+        run: npm.cmd install --global $env:OPENCODE_V2_PINNED_PACKAGE
+
+      - name: Verify pinned OpenCode V2
+        shell: pwsh
+        run: opencode2 --version
+
+      - name: Require runtime discovery
+        shell: pwsh
+        run: ./scripts/smoke-opencode.ps1 -RequireRuntimeDiscovery
+
+  latest-canary:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install latest OpenCode V2 beta
+        shell: pwsh
+        run: npm.cmd install --global $env:OPENCODE_V2_CANARY_PACKAGE
+
+      - name: Verify latest OpenCode V2 beta
+        shell: pwsh
+        run: opencode2 --version
+
+      - name: Probe runtime discovery
+        shell: pwsh
+        run: ./scripts/smoke-opencode.ps1 -RequireRuntimeDiscovery
