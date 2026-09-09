@@ -78,7 +78,7 @@ try {
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-Mode', 'Local') | Out-Null
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local installation remains invisible to Git.'
     $metadata = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\workflow-installation.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($metadata.workflowVersion -eq '1.14.0') -Message 'Installed metadata records version 1.14.0.'
+    Assert-True -Condition ($metadata.workflowVersion -eq '1.14.1') -Message 'Installed metadata records version 1.14.1.'
 
     $profileScript = Join-Path $repositoryRoot '.ai\scripts\profile-project.ps1'
     $profileOutput = Invoke-PowerShell -ScriptPath $profileScript -Arguments @('-OutputPath', '.ai/project-profile.json') -WorkingDirectory $repositoryRoot
@@ -140,6 +140,25 @@ try {
     Assert-True -Condition (($multiPrepare -join "`n") -match 'BOOTSTRAP_PROPOSAL_READY' -and @($backendModule.languages).Count -eq 1 -and $backendModule.languages[0] -eq 'csharp' -and @($frontendModule.languages).Count -eq 1 -and $frontendModule.languages[0] -eq 'javascript') -Message 'Bootstrap derives languages per module instead of reusing global language samples.'
     Assert-True -Condition (@($backendModule.quality.test).Count -eq 0 -and @($backendModule.quality.lint).Count -eq 0 -and $backendModule.architectures -contains 'architecture-simple-layered') -Message 'An application project named ClientsApiTest is not mistaken for a test project, and editorconfig alone does not establish dotnet format.'
     Assert-True -Condition ($frontendModule.quality.restore[0] -eq 'npm ci' -and $frontendModule.quality.build[0] -eq 'npm run build' -and $frontendModule.quality.lint[0] -eq 'npm run lint' -and @($frontendModule.quality.test).Count -eq 0) -Message 'Node quality commands follow lockfile and scripts while test stays empty without test evidence.'
+
+    $dotnetSolutionRoot = Join-Path $testRoot 'dotnet-solution-consumer'
+    New-Item -ItemType Directory -Path $dotnetSolutionRoot -Force | Out-Null
+    & git -C $dotnetSolutionRoot init -b main | Out-Null
+    & git -C $dotnetSolutionRoot config user.email 'workflow-tests@example.invalid'
+    & git -C $dotnetSolutionRoot config user.name 'Workflow Tests'
+    Set-Content -LiteralPath (Join-Path $dotnetSolutionRoot 'BackNet.sln') -Value 'Microsoft Visual Studio Solution File, Format Version 12.00' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $dotnetSolutionRoot 'ClientsApiTest.csproj') -Value '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $dotnetSolutionRoot 'ClientsApiTest.Tests.csproj') -Value '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup><PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" /></ItemGroup></Project>' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $dotnetSolutionRoot 'Program.cs') -Value 'public static class Program { public static void Main() {} }' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $dotnetSolutionRoot 'ClientTests.cs') -Value 'public sealed class ClientTests {}' -Encoding utf8
+    & git -C $dotnetSolutionRoot add --all
+    & git -C $dotnetSolutionRoot commit -m 'test: create root dotnet solution fixture' | Out-Null
+    Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $dotnetSolutionRoot, '-Mode', 'Local') | Out-Null
+    $dotnetSolutionPrepare = Invoke-PowerShell -ScriptPath (Join-Path $dotnetSolutionRoot '.ai\scripts\prepare-bootstrap-proposal.ps1') -Arguments @() -WorkingDirectory $dotnetSolutionRoot
+    $dotnetSolutionProject = Get-Content -LiteralPath (Join-Path $dotnetSolutionRoot '.ai\bootstrap-proposal\project.json') -Raw | ConvertFrom-Json
+    $dotnetSolutionModule = @($dotnetSolutionProject.modules)[0]
+    Assert-True -Condition (($dotnetSolutionPrepare -join "`n") -match 'BOOTSTRAP_PROPOSAL_READY' -and @($dotnetSolutionProject.modules).Count -eq 1 -and $dotnetSolutionModule.path -eq '.') -Message 'A root .NET solution with multiple project files remains one deterministic root module.'
+    Assert-True -Condition ($dotnetSolutionModule.quality.restore[0] -eq 'dotnet restore BackNet.sln' -and $dotnetSolutionModule.quality.build[0] -eq 'dotnet build BackNet.sln --no-restore' -and $dotnetSolutionModule.quality.test[0] -eq 'dotnet test BackNet.sln --no-build') -Message 'Root .NET quality commands target the unique solution explicitly and avoid MSB1011 when multiple project files exist.'
 
     $bootstrapProposalRoot = Join-Path $repositoryRoot '.ai\bootstrap-proposal'
     New-Item -ItemType Directory -Path $bootstrapProposalRoot -Force | Out-Null
@@ -700,13 +719,14 @@ exit 0
     Assert-True -Condition ($reviewer -notmatch 'resource:\s*"git ' -and $quickReviewer -notmatch 'resource:\s*"git ' -and $reviewer -match 'record-review\.ps1.*ReviewerRole reviewer' -and $quickReviewer -match 'record-review\.ps1.*ReviewerRole quick-reviewer') -Message 'Review agents expose only their role-bound deterministic recorder fallback and no Git shell access.'
     $developer = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\developer.md') -Raw
     $quickFix = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\quick-fix.md') -Raw
-    Assert-True -Condition ($developer -match 'resource:\s*"\.ai/\*"\s+effect:\s*deny' -and $quickFix -match 'resource:\s*"\.ai/runtime/\*/gates\.json"\s+effect:\s*deny') -Message 'Implementation agents deny control-plane edits and direct gate-evidence writes.'
+    Assert-True -Condition ($developer -match 'resource:\s*"\.ai/\*"\s+effect:\s*deny' -and $developer -match 'Do not attempt general shell commands' -and $developer -match 'Never combine commands' -and $quickFix -match 'resource:\s*"\.ai/runtime/\*/gates\.json"\s+effect:\s*deny') -Message 'Implementation agents deny control-plane edits, general or compound shell discovery, and direct gate-evidence writes.'
     $installedAgents = Get-Content -LiteralPath (Join-Path $repositoryRoot 'AGENTS.md') -Raw
     $installedOrchestrator = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\orchestrator.md') -Raw
     $installedOpenCode = Get-Content -LiteralPath (Join-Path $repositoryRoot 'opencode.json') -Raw
     $workflowTools = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\tools\workflow.ts') -Raw
     $installedBootstrapCommand = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\commands\ai-bootstrap.md') -Raw
     $installedBootstrapApplyCommand = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\commands\ai-bootstrap-apply.md') -Raw
+    $installedImplementCommand = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\commands\implement.md') -Raw
     $installedWorkflowStateSkill = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\workflow-state\SKILL.md') -Raw
     $installedRuntimeDoctorCommand = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\commands\workflow-doctor.md') -Raw
     $installedProjectContextSkill = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\project-context\SKILL.md') -Raw
@@ -717,6 +737,7 @@ exit 0
     Assert-True -Condition ($installedOpenCode -notmatch 'run-quality-gates\.ps1 \*.*allow' -and $installedOpenCode -match '"action": "workflow_\*".*"effect": "deny"') -Message 'Managed scripts are not exposed through automatically allowed shell wildcards.'
     Assert-True -Condition ($workflowTools -match 'Bun\.spawn\(\["pwsh"' -and $workflowTools -match 'export const gate = tool' -and $workflowTools -match 'export const state = tool' -and $workflowTools -match 'export const next = tool' -and $workflowTools -match 'export const bootstrap_prepare = tool' -and $workflowTools -match 'export const bootstrap_apply = tool' -and $workflowTools -match 'limit = 4_000') -Message 'Typed workflow tools pass validated arguments and return bounded state, gate, and fallback output.'
     Assert-True -Condition ($installedAgents -match 'initial callable-tool catalog' -and $installedWorkflowStateSkill -match 'Transport deterministic-script' -and $installedWorkflowStateSkill -match 'Never fall back after' -and $workflowTools -match 'lastTransitionTransport') -Message 'Typed and deterministic-script transports share fail-closed policy and persisted evidence.'
+    Assert-True -Condition ($installedImplementCommand -match 'workflow-state\.ps1 -Action Show -RunId <run-id> -Transport deterministic-script' -and $installedImplementCommand -match 'substitute `Validate`' -and $installedWorkflowStateSkill -match 'Never substitute `Validate` for `workflow_next`') -Message 'workflow_next has one exact Show fallback and cannot be replaced by a Validate transition.'
     Assert-True -Condition ($installedRuntimeDoctorCommand -match 'check-workflow-runtime\.ps1' -and (Test-Path -LiteralPath (Join-Path $repositoryRoot '.ai\scripts\check-workflow-runtime.ps1'))) -Message 'Installed workflow includes the model-free runtime preflight.'
     $runtimeDoctorOutput = Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\check-workflow-runtime.ps1') -Arguments @() -WorkingDirectory $repositoryRoot
     $runtimeDoctor = ($runtimeDoctorOutput -join "`n") | ConvertFrom-Json

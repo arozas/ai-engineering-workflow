@@ -3,7 +3,7 @@ description: Derive acceptance scenarios, add tests in test locations, and run d
 agent: orchestrator
 ---
 
-Require an exact run ID, call `workflow_next` once, and continue only when testing is a legal action for the current persisted state. Delegate testing of the approved behavior to `tester`.
+Require an exact run ID. If `workflow_next` is present in the initial callable-tool catalog, call it exactly once. If it is absent or explicitly unknown, unavailable, removed, or not callable, run exactly `pwsh -NoProfile -File .ai/scripts/workflow-state.ps1 -Action Show -RunId <run-id> -Transport deterministic-script` once. Do not search, retry, substitute `Validate`, or fall back after a validation, policy, state, or execution error. Continue only when testing is a legal action for the current persisted state. Delegate testing of the approved behavior to `tester`.
 
 Provide the ticket, acceptance criteria, approved plan, implementation diff, and affected module context. Require scenario coverage before test edits. The tester may edit only established test files and must return `TESTABILITY ISSUE` instead of changing production code.
 

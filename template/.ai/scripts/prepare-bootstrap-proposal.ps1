@@ -155,6 +155,47 @@ function Test-RepositoryFilesContain {
     return $false
 }
 
+function ConvertTo-QualityCommandArgument([string]$Value) {
+    if ($Value -match '^[A-Za-z0-9._/-]+$') { return $Value }
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
+function Get-ModuleRelativeManifestPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$ModulePath,
+        [Parameter(Mandatory = $true)][string]$ManifestPath
+    )
+
+    if ($ModulePath -eq '.') { return $ManifestPath }
+    $prefix = $ModulePath.TrimEnd('/') + '/'
+    if (-not $ManifestPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Manifest '$ManifestPath' is outside module '$ModulePath'."
+    }
+    return $ManifestPath.Substring($prefix.Length)
+}
+
+function Get-DotnetQualityTarget {
+    param([Parameter(Mandatory = $true)]$Candidate)
+
+    $solutions = @($Candidate.evidence | Where-Object { $_ -match '\.(sln|slnx)$' } | Sort-Object -Unique)
+    if ($solutions.Count -eq 1) {
+        return (Get-ModuleRelativeManifestPath -ModulePath ([string]$Candidate.path) -ManifestPath ([string]$solutions[0]))
+    }
+    if ($solutions.Count -gt 1) {
+        $script:qualityInferenceRisks.Add("Module '$($Candidate.path)' has multiple .NET solutions; quality commands remain empty until one target is approved.")
+        return $null
+    }
+
+    $projects = @($Candidate.evidence | Where-Object { $_ -match '\.(csproj|fsproj|vbproj)$' } | Sort-Object -Unique)
+    if ($projects.Count -eq 1) {
+        return (Get-ModuleRelativeManifestPath -ModulePath ([string]$Candidate.path) -ManifestPath ([string]$projects[0]))
+    }
+    if ($projects.Count -gt 1) {
+        $script:qualityInferenceRisks.Add("Module '$($Candidate.path)' has multiple .NET projects and no unique solution; quality commands remain empty until one target is approved.")
+    }
+    return $null
+}
+
 function Get-Frameworks {
     param(
         [Parameter(Mandatory = $true)]$Candidate
@@ -234,12 +275,17 @@ function Get-Quality {
     $hasDotnetFormattingEvidence = Test-RepositoryFilesContain -Paths $dotnetCommandEvidenceFiles -Pattern '(?i)(^|\s)dotnet\s+format(?:\s|$)'
 
     if ($hasDotnet) {
+        $dotnetTarget = Get-DotnetQualityTarget -Candidate $Candidate
+        if ([string]::IsNullOrWhiteSpace([string]$dotnetTarget)) {
+            return [ordered]@{ restore = @(); build = @(); lint = @(); typecheck = @(); test = @(); e2e = @() }
+        }
+        $targetArgument = ConvertTo-QualityCommandArgument -Value $dotnetTarget
         return [ordered]@{
-            restore = @('dotnet restore')
-            build = @('dotnet build --no-restore')
-            lint = @(if ($hasDotnetFormattingEvidence) { 'dotnet format --verify-no-changes' })
+            restore = @("dotnet restore $targetArgument")
+            build = @("dotnet build $targetArgument --no-restore")
+            lint = @(if ($hasDotnetFormattingEvidence) { "dotnet format $targetArgument --verify-no-changes" })
             typecheck = @()
-            test = @(if ($hasTestEvidence) { 'dotnet test --no-build' })
+            test = @(if ($hasTestEvidence) { "dotnet test $targetArgument --no-build" })
             e2e = @()
         }
     }
@@ -375,6 +421,7 @@ else {
 
 $modules = [System.Collections.Generic.List[object]]::new()
 $moduleEvidence = [System.Collections.Generic.List[string]]::new()
+$script:qualityInferenceRisks = [System.Collections.Generic.List[string]]::new()
 $index = 0
 foreach ($candidate in @($profile.moduleCandidates)) {
     $index++
@@ -618,6 +665,7 @@ $dryRun = ($dryRunOutput -join "`n") | ConvertFrom-Json
         if (@($profile.testFiles).Count -eq 0) { 'No test files were detected; test quality phases remain empty unless you add or approve evidence.' }
         if (@($profile.ciFiles).Count -eq 0) { 'No CI/CD files were detected.' }
         if (@($profile.conventionFiles).Count -eq 0) { 'No convention files were detected; lint/format commands remain empty unless explicit evidence is added.' }
+        foreach ($qualityRisk in $script:qualityInferenceRisks) { [string]$qualityRisk }
     )
     next = 'Review or edit .ai/bootstrap-proposal/, then run /ai-bootstrap-apply.'
 } | ConvertTo-Json -Depth 6

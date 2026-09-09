@@ -454,8 +454,21 @@ foreach ($smallModelContract in @('workflow_next', 'Do not repeat an unchanged s
 }
 foreach ($nextAwareCommand in @('run-status', 'implement', 'test', 'review', 'delivery-check')) {
     $nextAwareContent = Get-Content -LiteralPath (Join-Path $workflowRoot "template\.opencode\commands\$nextAwareCommand.md") -Raw
-    if ($nextAwareContent -notmatch [regex]::Escape('workflow_next') -or $nextAwareContent -notmatch [regex]::Escape('once')) {
-        $errors += "$nextAwareCommand must use workflow_next exactly once at its resume boundary."
+    foreach ($nextContractToken in @('workflow_next', 'once', 'workflow-state.ps1 -Action Show -RunId <run-id> -Transport deterministic-script', 'substitute `Validate`')) {
+        if ($nextAwareContent -notmatch [regex]::Escape($nextContractToken)) {
+            $errors += "$nextAwareCommand is missing workflow_next resume contract: $nextContractToken."
+        }
+    }
+}
+$bootstrapPreparerContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\prepare-bootstrap-proposal.ps1') -Raw
+foreach ($dotnetTargetToken in @('Get-DotnetQualityTarget', 'dotnet restore $targetArgument', 'dotnet build $targetArgument --no-restore', 'dotnet test $targetArgument --no-build', 'multiple .NET solutions')) {
+    if ($bootstrapPreparerContent -notmatch [regex]::Escape($dotnetTargetToken)) {
+        $errors += "Bootstrap preparer is missing deterministic .NET target inference: $dotnetTargetToken."
+    }
+}
+foreach ($developerShellToken in @('Do not attempt general shell commands', 'Never combine commands with `;`, `&&`, `||`, or `|`')) {
+    if ($developerAgentContent -notmatch [regex]::Escape($developerShellToken)) {
+        $errors += "developer is missing bounded shell guidance: $developerShellToken."
     }
 }
 foreach ($skillScopedAgent in @{

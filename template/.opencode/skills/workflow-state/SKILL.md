@@ -14,7 +14,7 @@ Use a lowercase run ID of 3-64 characters, for example `ticket-18427` or `quick-
 
 ## Required transitions
 
-Use the deterministic tool transport defined in `AGENTS.md`. Prefer the visible typed `workflow_state` tool; when it is absent or explicitly unavailable, invoke `.ai/scripts/workflow-state.ps1` exactly once with `pwsh -NoProfile -File` and `-Transport deterministic-script`. Do not search for a missing tool, use `powershell`, use `pwsh -Command`, compose shell expressions, or retry. Never fall back after a validation, policy, state, or execution failure.
+Use the deterministic tool transport defined in `AGENTS.md`. Prefer the visible typed `workflow_state` tool; when it is absent or explicitly unavailable, invoke `.ai/scripts/workflow-state.ps1` exactly once with `pwsh -NoProfile -File` and `-Transport deterministic-script`. For `workflow_next`, the only fallback is exactly `pwsh -NoProfile -File .ai/scripts/workflow-state.ps1 -Action Show -RunId <run-id> -Transport deterministic-script`, once. Never substitute `Validate` for `workflow_next`. Do not search for a missing tool, use `powershell`, use `pwsh -Command`, compose shell expressions, or retry. Never fall back after a validation, policy, state, or execution failure.
 
 1. Choose a unique run ID, write the normalized request to `.ai/runtime/<run-id>/requirement.md`, then `Start` with `standard` or `fast-path`.
 2. Write the complete proposed plan to `.ai/runtime/<run-id>/plan.md` and a schema-valid `.ai/runtime/<run-id>/verification.json`. The manifest lists mandatory run-specific commands not already configured for the affected modules and is empty when none are needed.

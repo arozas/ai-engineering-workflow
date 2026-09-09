@@ -48,7 +48,13 @@ If a second `/ai-bootstrap` appears ready to regenerate an unchanged proposal, s
 
 ## An agent repeats tools or appears stuck in a loop
 
-Use `/run-status <run-id>` once. Current agents call `workflow_next` once, take one legal action, and stop at approvals or terminal states. Repeating an unchanged state, gate, classifier, review, delegation, or search is a protocol violation. Do not keep prompting the same model to continue indefinitely: preserve the run ID and artifacts, then retry the role with a stronger model if needed.
+Use `/run-status <run-id>` once. Current agents call `workflow_next` once, take one legal action, and stop at approvals or terminal states. If that typed tool is unavailable, the command must use `workflow-state.ps1 -Action Show`; an observed `-Action Validate`, tool search, or retry means the installed prompt is stale. Repeating an unchanged state, gate, classifier, review, delegation, or search is a protocol violation. Do not keep prompting the same model to continue indefinitely: preserve the run ID and artifacts, then retry the role with a stronger model if needed.
+
+## .NET gates fail with MSB1011 after adding a test project
+
+Inspect the frozen matrix reported at plan approval. Restore, build, formatting, and test commands for a module containing a solution should name that solution, for example `dotnet build BackNet.sln --no-restore`. Bare commands such as `dotnet build --no-restore` become ambiguous as soon as the working directory contains more than one project or solution file.
+
+Workflow 1.14.1 makes bootstrap target a unique `.sln`/`.slnx`, or a single project when no solution exists. Multiple solutions, or multiple projects without a solution, stay empty and produce a proposal risk instead of guessing. Existing installed project context and already frozen runs are intentionally immutable: update the workflow, regenerate and approve bootstrap context, then create a new run rather than editing state or gate evidence.
 
 For bootstrap, inspect `.ai/bootstrap-proposal/approval.md` and `evidence.md`; for gates, inspect `.ai/runtime/<run-id>/gates.json`. The full evidence is persisted even though model-facing tool output is intentionally compact. Record duplicate calls, violations, and step-limit exhaustion in the benchmark rather than increasing every agent's step budget.
 

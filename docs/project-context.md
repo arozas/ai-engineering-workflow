@@ -48,9 +48,10 @@ The draft `project.json` uses final installed paths such as `.ai/project-profile
 1. Languages are derived independently for each module from all Git-visible files in that module.
 2. Test commands require actual test files or a test project identified from project content, never from an application filename containing `Test`.
 3. `dotnet format` requires an established repository or CI command; `.editorconfig` alone is insufficient.
-4. Node package-manager commands follow lockfiles and declared package scripts.
-5. Unsupported stacks remain explicit and do not create dangling generated-skill references.
-6. Timestamps are emitted and checked as RFC 3339 independently of machine culture.
+4. .NET quality commands target the module's single solution explicitly. When no solution exists, one project file may be targeted; multiple solutions or multiple projects without a unique solution remain unconfigured for human review. This prevents `MSB1011` after a test project is added beside an application project.
+5. Node package-manager commands follow lockfiles and declared package scripts.
+6. Unsupported stacks remain explicit and do not create dangling generated-skill references.
+7. Timestamps are emitted and checked as RFC 3339 independently of machine culture.
 
 `evidence.md` records the structural profile, module inference, declared bootstrap intent, risks, and review instructions. `evidence-packet.json` lists at most three representative production and three representative test files per module. It is the complete exploration boundary for optional enrichment.
 
@@ -81,11 +82,11 @@ Each module defines:
     "project-api"
   ],
   "quality": {
-    "restore": ["dotnet restore"],
-    "build": ["dotnet build --no-restore"],
-    "lint": ["dotnet format --verify-no-changes"],
+    "restore": ["dotnet restore Api.sln"],
+    "build": ["dotnet build Api.sln --no-restore"],
+    "lint": ["dotnet format Api.sln --verify-no-changes"],
     "typecheck": [],
-    "test": ["dotnet test --no-build"],
+    "test": ["dotnet test Api.sln --no-build"],
     "e2e": []
   }
 }
@@ -93,7 +94,7 @@ Each module defines:
 
 Module paths are repository-relative and may be `.` for a root application. Absolute and escaping paths are rejected. IDs are stable kebab-case values used in approvals and evidence.
 
-Quality commands must be single-line commands proven by repository evidence such as package scripts, solutions, build files, or CI. Bootstrap does not infer a conventional command merely because a language is present.
+Quality commands must be single-line commands proven by repository evidence such as package scripts, solutions, build files, or CI. Bootstrap does not infer a conventional command merely because a language is present. Task-specific .NET commands added later in `verification.json` should reuse the configured explicit solution or project target; a bare `dotnet test` in a directory that can contain multiple project files is not approval-ready.
 
 ## Project rules
 

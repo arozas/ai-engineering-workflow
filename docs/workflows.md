@@ -42,7 +42,7 @@ Changing module selection later requires a new approved plan. Conversation histo
 
 Run `/implement` or request the full workflow. The orchestrator validates the run and sends the canonical requirement, plan, constraints, diff budget, and selected module context to the developer.
 
-The developer stops with `PLAN INVALIDATED` if repository evidence contradicts the plan. It cannot add dependencies, change public contracts, alter migrations or CI/CD, or expand a refactor without approval.
+The developer stops with `PLAN INVALIDATED` if repository evidence contradicts the plan. It cannot add dependencies, change public contracts, alter migrations or CI/CD, or expand a refactor without approval. It does not use general shell commands for discovery, Git inspection, runtime checks, or ad hoc verification, and it never composes multiple commands; persisted evidence and the deterministic gate runner own those operations.
 
 The tester may add focused tests only in established test locations. If testing requires a production design change, it reports `TESTABILITY ISSUE`.
 
@@ -57,7 +57,7 @@ The tester may add focused tests only in established test locations. If testing 
 5. `test`
 6. `e2e`
 
-Configured commands run first and approved task-specific commands follow in manifest order within the same phase. An empty phase is `NOT CONFIGURED`. The first failure normally stops that module and later commands become `NOT RUN`. A module with no commands is incomplete, not passing.
+Configured commands run first and approved task-specific commands follow in manifest order within the same phase. An empty phase is `NOT CONFIGURED`. The first failure normally stops that module and later commands become `NOT RUN`. A module with no commands is incomplete, not passing. For .NET modules, bootstrap-generated commands explicitly name the unique solution or project so adding another `.csproj` cannot turn a previously valid gate into `MSB1011`; approved run-specific commands must preserve that target.
 
 The runner writes `.ai/runtime/<run-id>/gates.json`. If the run, project, runner, matrix, and worktree fingerprints are unchanged, a repeated gate request returns the existing validated artifact instead of executing commands again. `force: true` is reserved for an explicit intentional rerun. State accepts only that run-specific path and independently validates the run ID, module identities and paths, phases and commands, hashes, exit-derived status, and worktree stability before accepting it. Other active runs keep separate staging directories.
 
@@ -121,4 +121,4 @@ Merge, rebase, reset, release, deployment, secret mutation, and cloud mutation r
 
 ## Resuming work
 
-Use `/run-status <run-id>`. It validates artifact hashes and shows status, route, source diagnosis, Git state, quality plan, correction usage, and next legal action. Internally `workflow_next` returns a compact state summary; an agent must call it once, perform one returned action, and stop at the next approval, blocker, escalation, or terminal boundary. Repeating an unchanged state, gate, classifier, review, delegation, or search is a protocol violation. If multiple nonterminal runs exist, commands require an exact ID and never guess.
+Use `/run-status <run-id>`. It validates artifact hashes and shows status, route, source diagnosis, Git state, quality plan, correction usage, and next legal action. Internally `workflow_next` returns a compact state summary. When the typed tool is absent, the only compatible lookup is `pwsh -NoProfile -File .ai/scripts/workflow-state.ps1 -Action Show -RunId <run-id> -Transport deterministic-script`, once; `Validate` is not a substitute. An agent must perform one returned action and stop at the next approval, blocker, escalation, or terminal boundary. Repeating an unchanged state, gate, classifier, review, delegation, or search is a protocol violation. If multiple nonterminal runs exist, commands require an exact ID and never guess.
