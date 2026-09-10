@@ -1,28 +1,111 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AI Engineering Workflow run-specific verification manifest",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schemaVersion", "runId", "commands"],
-  "properties": {
-    "schemaVersion": { "const": 1 },
-    "runId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
-    "commands": {
-      "type": "array",
-      "maxItems": 20,
-      "items": { "$ref": "#/$defs/command" }
-    }
-  },
+  "title": "AI Engineering Workflow run-specific verification and execution contract",
+  "oneOf": [
+    { "$ref": "#/$defs/legacyManifest" },
+    { "$ref": "#/$defs/executionContract" }
+  ],
   "$defs": {
+    "legacyManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "commands"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "runId": { "$ref": "#/$defs/runId" },
+        "commands": { "$ref": "#/$defs/commands" }
+      }
+    },
+    "executionContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "runId", "affectedModules", "expectedChanges", "dependencies", "decisions", "unresolvedDecisions", "constraints", "estimatedChanges", "commands"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "runId": { "$ref": "#/$defs/runId" },
+        "affectedModules": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/moduleId" }
+        },
+        "expectedChanges": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/expectedChange" }
+        },
+        "dependencies": {
+          "type": "array",
+          "maxItems": 30,
+          "items": { "$ref": "#/$defs/dependency" }
+        },
+        "decisions": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/oneLine" }
+        },
+        "unresolvedDecisions": { "type": "array", "maxItems": 0 },
+        "constraints": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/oneLine" }
+        },
+        "estimatedChanges": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["files", "lines"],
+          "properties": {
+            "files": { "type": "integer", "minimum": 1, "maximum": 100 },
+            "lines": { "type": "integer", "minimum": 1, "maximum": 20000 }
+          }
+        },
+        "commands": { "$ref": "#/$defs/commands" }
+      }
+    },
+    "runId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+    "moduleId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "repoPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "^(?![\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))[^\\r\\n]+$"
+    },
+    "oneLine": { "type": "string", "minLength": 1, "maxLength": 1000, "pattern": "^[^\\r\\n]+$" },
+    "expectedChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "action", "reason"],
+      "properties": {
+        "path": { "$ref": "#/$defs/repoPath" },
+        "action": { "enum": ["create", "modify", "delete"] },
+        "reason": { "$ref": "#/$defs/oneLine" }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "source", "reason"],
+      "properties": {
+        "name": { "$ref": "#/$defs/oneLine" },
+        "version": { "$ref": "#/$defs/oneLine" },
+        "source": { "enum": ["repository", "approved-requirement", "approved-plan"] },
+        "reason": { "$ref": "#/$defs/oneLine" }
+      }
+    },
+    "commands": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/command" } },
     "command": {
       "type": "object",
       "additionalProperties": false,
       "required": ["moduleId", "phase", "command", "reason"],
       "properties": {
-        "moduleId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "moduleId": { "$ref": "#/$defs/moduleId" },
         "phase": { "enum": ["restore", "build", "lint", "typecheck", "test", "e2e"] },
         "command": { "type": "string", "minLength": 1, "maxLength": 1000, "pattern": "^[^\\r\\n]+$" },
-        "reason": { "type": "string", "minLength": 1, "maxLength": 1000, "pattern": "^[^\\r\\n]+$" }
+        "reason": { "$ref": "#/$defs/oneLine" }
       }
     }
   }

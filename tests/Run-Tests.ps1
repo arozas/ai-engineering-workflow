@@ -78,7 +78,7 @@ try {
     Invoke-PowerShell -ScriptPath (Join-Path $distributionRoot 'scripts\install.ps1') -Arguments @('-TargetPath', $repositoryRoot, '-Mode', 'Local') | Out-Null
     Assert-True -Condition (@(& git -C $repositoryRoot status --porcelain).Count -eq 0) -Message 'Local installation remains invisible to Git.'
     $metadata = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\workflow-installation.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($metadata.workflowVersion -eq '1.14.1') -Message 'Installed metadata records version 1.14.1.'
+    Assert-True -Condition ($metadata.workflowVersion -eq '1.15.0') -Message 'Installed metadata records version 1.15.0.'
 
     $profileScript = Join-Path $repositoryRoot '.ai\scripts\profile-project.ps1'
     $profileOutput = Invoke-PowerShell -ScriptPath $profileScript -Arguments @('-OutputPath', '.ai/project-profile.json') -WorkingDirectory $repositoryRoot
@@ -159,6 +159,25 @@ try {
     $dotnetSolutionModule = @($dotnetSolutionProject.modules)[0]
     Assert-True -Condition (($dotnetSolutionPrepare -join "`n") -match 'BOOTSTRAP_PROPOSAL_READY' -and @($dotnetSolutionProject.modules).Count -eq 1 -and $dotnetSolutionModule.path -eq '.') -Message 'A root .NET solution with multiple project files remains one deterministic root module.'
     Assert-True -Condition ($dotnetSolutionModule.quality.restore[0] -eq 'dotnet restore BackNet.sln' -and $dotnetSolutionModule.quality.build[0] -eq 'dotnet build BackNet.sln --no-restore' -and $dotnetSolutionModule.quality.test[0] -eq 'dotnet test BackNet.sln --no-build') -Message 'Root .NET quality commands target the unique solution explicitly and avoid MSB1011 when multiple project files exist.'
+    $dotnetPrepareResult = ($dotnetSolutionPrepare -join "`n") | ConvertFrom-Json
+    Assert-True -Condition (@($dotnetPrepareResult.risks | Where-Object { $_ -match 'not ignored' }).Count -ge 2 -and @($dotnetPrepareResult.risks | Where-Object { $_ -match 'Control-plane output risk' }).Count -eq 1) -Message 'Bootstrap surfaces missing generated-output ignores and root Web control-plane output risk before planning.'
+    Invoke-PowerShell -ScriptPath (Join-Path $dotnetSolutionRoot '.ai\scripts\apply-bootstrap-proposal.ps1') -Arguments @() -WorkingDirectory $dotnetSolutionRoot | Out-Null
+    $dotnetHygieneRunId = 'gate-dotnet-hygiene'
+    $dotnetRuntimeRoot = Join-Path $dotnetSolutionRoot ".ai\runtime\$dotnetHygieneRunId"
+    New-Item -ItemType Directory -Path $dotnetRuntimeRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $dotnetRuntimeRoot 'requirement.md') -Value 'Prove repository hygiene blocks .NET gates before commands execute.' -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $dotnetRuntimeRoot 'plan.md') -Value 'Run the configured matrix without changing application files.' -Encoding utf8
+    [ordered]@{ schemaVersion = 1; runId = $dotnetHygieneRunId; commands = @() } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $dotnetRuntimeRoot 'verification.json') -Encoding utf8
+    $dotnetStateScript = Join-Path $dotnetSolutionRoot '.ai\scripts\workflow-state.ps1'
+    Invoke-PowerShell -ScriptPath $dotnetStateScript -Arguments @('-Action', 'Start', '-RunId', $dotnetHygieneRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', ".ai/runtime/$dotnetHygieneRunId/requirement.md") -WorkingDirectory $dotnetSolutionRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $dotnetStateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $dotnetHygieneRunId, '-ArtifactPath', ".ai/runtime/$dotnetHygieneRunId/plan.md", '-VerificationPath', ".ai/runtime/$dotnetHygieneRunId/verification.json", '-AffectedModules', 'app') -WorkingDirectory $dotnetSolutionRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $dotnetStateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $dotnetHygieneRunId) -WorkingDirectory $dotnetSolutionRoot | Out-Null
+    Invoke-PowerShell -ScriptPath (Join-Path $dotnetSolutionRoot '.ai\scripts\run-quality-gates.ps1') -Arguments @('-RunId', $dotnetHygieneRunId) -ExpectedExitCode 4 -WorkingDirectory $dotnetSolutionRoot | Out-Null
+    $dotnetHygieneEvidence = Get-Content -LiteralPath (Join-Path $dotnetRuntimeRoot 'gates.json') -Raw | ConvertFrom-Json
+    Assert-True -Condition ($dotnetHygieneEvidence.overall -eq 'BLOCKED_REPOSITORY_HYGIENE' -and $dotnetHygieneEvidence.repositoryHygiene.status -eq 'BLOCKED' -and @($dotnetHygieneEvidence.modules[0].phases | ForEach-Object commands | Where-Object status -ne 'NOT_RUN').Count -eq 0) -Message 'Repository hygiene blocks .NET gates before any configured command executes.'
+    Invoke-PowerShell -ScriptPath $dotnetStateScript -Arguments @('-Action', 'RecordGates', '-RunId', $dotnetHygieneRunId, '-ArtifactPath', ".ai/runtime/$dotnetHygieneRunId/gates.json", '-Verdict', 'BLOCKED') -WorkingDirectory $dotnetSolutionRoot | Out-Null
+    $dotnetBlockedState = Get-Content -LiteralPath (Join-Path $dotnetSolutionRoot ".ai\runs\$dotnetHygieneRunId\state.json") -Raw | ConvertFrom-Json
+    Assert-True -Condition ($dotnetBlockedState.status -eq 'GATE_BLOCKED') -Message 'Repository hygiene persists as GATE_BLOCKED instead of consuming a correction iteration.'
 
     $bootstrapProposalRoot = Join-Path $repositoryRoot '.ai\bootstrap-proposal'
     New-Item -ItemType Directory -Path $bootstrapProposalRoot -Force | Out-Null
@@ -506,9 +525,10 @@ Applies to `src/app`.
     $quickVerificationPath = Set-RunVerification -RunId $runId
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $runId, '-ArtifactPath', (Get-RunRuntimeRelativePath $runId 'plan.md'), '-VerificationPath', $quickVerificationPath, '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
     $managedBranch = 'test/workflow-evidence'
-    Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\create-branch.ps1') -Arguments @('-RunId', $runId, '-Name', $managedBranch) -WorkingDirectory $repositoryRoot | Out-Null
+    $branchCreationOutput = Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\create-branch.ps1') -Arguments @('-RunId', $runId, '-Name', $managedBranch) -WorkingDirectory $repositoryRoot
+    $branchCreationReport = ($branchCreationOutput -join "`n") | ConvertFrom-Json
     $branchState = (Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Validate', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-String) | ConvertFrom-Json
-    Assert-True -Condition ($branchState.status -eq 'PLAN_APPROVED' -and $branchState.artifacts.branch.verdict -eq 'PASS' -and (& git -C $repositoryRoot branch --show-current).Trim() -eq $managedBranch) -Message 'Approved branch creation persists evidence and keeps the plan ready for implementation.'
+    Assert-True -Condition ($branchCreationReport.verdict -eq 'BRANCH_CREATED' -and $branchCreationReport.artifactSha256 -match '^[a-f0-9]{64}$' -and $branchState.status -eq 'PLAN_APPROVED' -and $branchState.artifacts.branch.verdict -eq 'PASS' -and (& git -C $repositoryRoot branch --show-current).Trim() -eq $managedBranch) -Message 'Approved branch creation returns compact persisted evidence and keeps the plan ready for implementation.'
     Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $runId) -WorkingDirectory $repositoryRoot | Out-Null
     Set-Content -LiteralPath (Join-Path $sourceRoot 'app.js') -Value 'export const value = "after";' -Encoding utf8
     Set-Content -LiteralPath (Join-Path $sourceRoot 'new.txt') -Value 'new file' -Encoding utf8
@@ -714,12 +734,67 @@ exit 0
     Remove-Item -LiteralPath (Join-Path $repositoryRoot 'package.json') -Force
     Assert-True -Condition $true -Message 'Dependency manifest changes escalate from the fast path.'
 
+    $planScopeRunId = 'plan-scope-invalid'
+    Set-Content -LiteralPath (Get-RunRuntimePath $planScopeRunId 'requirement.md') -Value 'Change only the approved fixture file.' -Encoding utf8
+    Set-Content -LiteralPath (Get-RunRuntimePath $planScopeRunId 'plan.md') -Value 'Modify only src/app/app.js and run configured verification.' -Encoding utf8
+    [ordered]@{
+        schemaVersion = 2
+        runId = $planScopeRunId
+        affectedModules = @('app')
+        expectedChanges = @([ordered]@{ path = 'src/app/app.js'; action = 'modify'; reason = 'Implement the approved fixture change.' })
+        dependencies = @()
+        decisions = @('Modify the existing export only.')
+        unresolvedDecisions = @()
+        constraints = @('Do not change workflow control-plane files.')
+        estimatedChanges = [ordered]@{ files = 1; lines = 1 }
+        commands = @()
+    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Get-RunRuntimePath $planScopeRunId 'verification.json') -Encoding utf8
+    $executionContractJson = Get-Content -LiteralPath (Get-RunRuntimePath $planScopeRunId 'verification.json') -Raw
+    $executionContractSchema = Get-Content -LiteralPath (Join-Path $repositoryRoot '.ai\task-verification.schema.json') -Raw
+    Assert-True -Condition ($executionContractJson | Test-Json -Schema $executionContractSchema -ErrorAction Stop) -Message 'A complete schema-version-2 execution contract validates.'
+    $unresolvedContract = $executionContractJson | ConvertFrom-Json
+    $unresolvedContract.unresolvedDecisions = @('Choose an implementation alternative.')
+    $unresolvedContractJson = $unresolvedContract | ConvertTo-Json -Depth 8
+    Assert-True -Condition (-not ($unresolvedContractJson | Test-Json -Schema $executionContractSchema -ErrorAction SilentlyContinue)) -Message 'Schema-version-2 contracts reject unresolved material decisions before approval.'
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $planScopeRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', (Get-RunRuntimeRelativePath $planScopeRunId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $planScopeRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $planScopeRunId 'plan.md'), '-VerificationPath', (Get-RunRuntimeRelativePath $planScopeRunId 'verification.json'), '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $planScopeRunId) -WorkingDirectory $repositoryRoot | Out-Null
+    $unplannedPath = Join-Path $sourceRoot 'unplanned.txt'
+    Set-Content -LiteralPath $unplannedPath -Value 'outside approved scope' -Encoding utf8
+    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $planScopeRunId) -ExpectedExitCode 4 -WorkingDirectory $repositoryRoot | Out-Null
+    $scopeEvidence = Get-Content -LiteralPath (Get-RunRuntimePath $planScopeRunId 'gates.json') -Raw | ConvertFrom-Json
+    Assert-True -Condition ($scopeEvidence.overall -eq 'PLAN_INVALIDATED' -and $scopeEvidence.planScope.status -eq 'INVALID' -and $scopeEvidence.planScope.unexpectedPaths -contains 'src/app/unplanned.txt') -Message 'Schema-version-2 plans fail closed when actual changed paths differ from the frozen execution contract.'
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordGates', '-RunId', $planScopeRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $planScopeRunId 'gates.json'), '-Verdict', 'BLOCKED') -WorkingDirectory $repositoryRoot | Out-Null
+    $invalidatedState = Get-Content -LiteralPath (Join-Path $repositoryRoot ".ai\runs\$planScopeRunId\state.json") -Raw | ConvertFrom-Json
+    Assert-True -Condition ($invalidatedState.status -eq 'PLAN_INVALIDATED') -Message 'Deterministic scope evidence persists PLAN_INVALIDATED without opening a correction loop.'
+    Remove-Item -LiteralPath $unplannedPath -Force
+
+    $controlOutputRunId = 'gate-control-output'
+    Set-Content -LiteralPath (Get-RunRuntimePath $controlOutputRunId 'requirement.md') -Value 'Reject workflow control-plane content from generated output.' -Encoding utf8
+    Set-Content -LiteralPath (Get-RunRuntimePath $controlOutputRunId 'plan.md') -Value 'Run the configured matrix and inspect generated output.' -Encoding utf8
+    $controlOutputVerification = Set-RunVerification -RunId $controlOutputRunId
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'Start', '-RunId', $controlOutputRunId, '-WorkflowPath', 'standard', '-TaskType', 'Test', '-ArtifactPath', (Get-RunRuntimeRelativePath $controlOutputRunId 'requirement.md')) -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'ApprovePlan', '-RunId', $controlOutputRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $controlOutputRunId 'plan.md'), '-VerificationPath', $controlOutputVerification, '-AffectedModules', 'app') -WorkingDirectory $repositoryRoot | Out-Null
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'BeginImplementation', '-RunId', $controlOutputRunId) -WorkingDirectory $repositoryRoot | Out-Null
+    $generatedOutputRoot = Join-Path $sourceRoot 'bin'
+    New-Item -ItemType Directory -Path $generatedOutputRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $generatedOutputRoot 'opencode.json') -Value '{}' -Encoding utf8
+    Invoke-PowerShell -ScriptPath $gateRunner -Arguments @('-RunId', $controlOutputRunId) -ExpectedExitCode 4 -WorkingDirectory $repositoryRoot | Out-Null
+    $controlOutputEvidence = Get-Content -LiteralPath (Get-RunRuntimePath $controlOutputRunId 'gates.json') -Raw | ConvertFrom-Json
+    Assert-True -Condition ($controlOutputEvidence.overall -eq 'CONTROL_PLANE_OUTPUT' -and $controlOutputEvidence.controlPlaneOutputPaths -contains 'src/app/bin/opencode.json') -Message 'Quality gates block workflow control-plane files discovered in generated build output.'
+    Invoke-PowerShell -ScriptPath $stateScript -Arguments @('-Action', 'RecordGates', '-RunId', $controlOutputRunId, '-ArtifactPath', (Get-RunRuntimeRelativePath $controlOutputRunId 'gates.json'), '-Verdict', 'BLOCKED') -WorkingDirectory $repositoryRoot | Out-Null
+    Remove-Item -LiteralPath $generatedOutputRoot -Recurse -Force
+
     $reviewer = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\reviewer.md') -Raw
     $quickReviewer = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\quick-reviewer.md') -Raw
     Assert-True -Condition ($reviewer -notmatch 'resource:\s*"git ' -and $quickReviewer -notmatch 'resource:\s*"git ' -and $reviewer -match 'record-review\.ps1.*ReviewerRole reviewer' -and $quickReviewer -match 'record-review\.ps1.*ReviewerRole quick-reviewer') -Message 'Review agents expose only their role-bound deterministic recorder fallback and no Git shell access.'
     $developer = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\developer.md') -Raw
+    $delivery = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\delivery.md') -Raw
     $quickFix = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\quick-fix.md') -Raw
-    Assert-True -Condition ($developer -match 'resource:\s*"\.ai/\*"\s+effect:\s*deny' -and $developer -match 'Do not attempt general shell commands' -and $developer -match 'Never combine commands' -and $quickFix -match 'resource:\s*"\.ai/runtime/\*/gates\.json"\s+effect:\s*deny') -Message 'Implementation agents deny control-plane edits, general or compound shell discovery, and direct gate-evidence writes.'
+    $xunitRecipe = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\skills\stack-dotnet\references\xunit-test-project.md') -Raw
+    Assert-True -Condition ($developer -match 'resource:\s*"\.ai/\*"\s+effect:\s*deny' -and $developer -match 'Do not attempt general shell commands' -and $developer -match 'Never combine commands' -and $developer -match 'workflow_dotnet_solution_add' -and $quickFix -match 'resource:\s*"\.ai/runtime/\*/gates\.json"\s+effect:\s*deny') -Message 'Implementation agents deny control-plane edits, general or compound shell discovery, and direct gate-evidence writes.'
+    Assert-True -Condition ($xunitRecipe -match '<Using Include="Xunit" />' -and $xunitRecipe -match 'DefaultItemExcludes' -and $xunitRecipe -match 'workflow_dotnet_solution_add') -Message 'The installed .NET skill includes a compile-safe xUnit and root-project recipe.'
+    Assert-True -Condition ($delivery -match 'do not load `conventional-commit`' -and $delivery -match 'Do not run raw `git status`' -and $delivery -match 'call `.ai/scripts/create-branch.ps1` exactly once') -Message 'Branch delivery avoids unrelated skills, duplicate Git discovery, and repeated mutations.'
     $installedAgents = Get-Content -LiteralPath (Join-Path $repositoryRoot 'AGENTS.md') -Raw
     $installedOrchestrator = Get-Content -LiteralPath (Join-Path $repositoryRoot '.opencode\agents\orchestrator.md') -Raw
     $installedOpenCode = Get-Content -LiteralPath (Join-Path $repositoryRoot 'opencode.json') -Raw
@@ -741,7 +816,11 @@ exit 0
     Assert-True -Condition ($installedRuntimeDoctorCommand -match 'check-workflow-runtime\.ps1' -and (Test-Path -LiteralPath (Join-Path $repositoryRoot '.ai\scripts\check-workflow-runtime.ps1'))) -Message 'Installed workflow includes the model-free runtime preflight.'
     $runtimeDoctorOutput = Invoke-PowerShell -ScriptPath (Join-Path $repositoryRoot '.ai\scripts\check-workflow-runtime.ps1') -Arguments @() -WorkingDirectory $repositoryRoot
     $runtimeDoctor = ($runtimeDoctorOutput -join "`n") | ConvertFrom-Json
-    Assert-True -Condition ([int]$runtimeDoctor.powerShell.minimumMajor -eq 7 -and $runtimeDoctor.verdict -in @('RUNTIME_READY', 'RUNTIME_WARNING', 'RUNTIME_BLOCKED')) -Message 'Runtime preflight returns deterministic PowerShell and OpenCode selection evidence.'
+    $runtimeSelectionSafe = if ($IsWindows -and @($runtimeDoctor.installations).Count -gt 0 -and @($runtimeDoctor.installations | ForEach-Object shims | Where-Object { $_ -match '\.cmd$' }).Count -gt 0) {
+        [string]$runtimeDoctor.selectedOpenCode -match '\.cmd$' -and [string]$runtimeDoctor.recommendedCommand -eq 'opencode2.cmd'
+    }
+    else { $true }
+    Assert-True -Condition ([int]$runtimeDoctor.powerShell.minimumMajor -eq 7 -and $runtimeDoctor.verdict -in @('RUNTIME_READY', 'RUNTIME_WARNING', 'RUNTIME_BLOCKED') -and $runtimeSelectionSafe) -Message 'Runtime preflight returns an execution-policy-safe OpenCode launcher when a Windows cmd shim is available.'
     Assert-True -Condition ($installedAgents -match 'For `/ai-bootstrap`, do not load `project-context` first' -and $installedOrchestrator -match 'run `workflow_bootstrap_prepare`' -and $installedOrchestrator -match 'Do not read source files, list directories, load `project-context`, ask for bootstrap input') -Message 'Bootstrap precedence prevents AGENTS/orchestrator guidance from bypassing the deterministic preparer.'
     Assert-True -Condition ($installedProjectContextSkill -match 'If the current task is `/ai-bootstrap`, stop using this skill' -and $installedProjectContextSkill -match 'do not inspect files, ask for bootstrap input, or create project configuration from this skill') -Message 'project-context cannot bootstrap a missing project from ad hoc exploration.'
     Assert-True -Condition ($installedBootstrapCommand -match 'workflow_bootstrap_prepare' -and $installedBootstrapCommand -match 'prepare-bootstrap-proposal\.ps1' -and $installedBootstrapCommand -match 'Do not read source files' -and $installedBootstrapCommand -match '\.ai/bootstrap-proposal/project\.json') -Message 'Bootstrap command delegates proposal creation to the deterministic preparer.'

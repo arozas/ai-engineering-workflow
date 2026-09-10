@@ -73,6 +73,8 @@ function nextActions(status: string, workflowPath: string): string[] {
     IMPLEMENTING: ["workflow_gate", "RecordGates", "Escalate"],
     GATES_PASSED: [workflowPath === "fast-path" ? "workflow_quick_review" : "workflow_standard_review", "Escalate"],
     GATE_FAILED: ["BeginCorrection", "Escalate"],
+    GATE_BLOCKED: ["start a repository-hygiene run", "Escalate"],
+    PLAN_INVALIDATED: ["start a new plan", "Escalate"],
     REVIEW_FAILED: ["BeginCorrection", "Escalate"],
     READY_FOR_DELIVERY: ["delivery-check", "commit", "stop"],
     COMMITTED: ["publish", "stop"],
@@ -146,7 +148,18 @@ function compactGate(value: any, exitCode: number): string {
       worktreeStable: value.worktreeStable,
       worktreeFingerprint: value.worktreeFingerprint,
       modules,
-      next: value.overall === "PASS" ? "RecordGates with PASS" : "RecordGates with FAIL; do not rerun unchanged gates",
+      repositoryHygiene: value.repositoryHygiene,
+      planScope: value.planScope,
+      worktreeChanges: value.worktreeChanges,
+      controlPlaneOutputPaths: value.controlPlaneOutputPaths || [],
+      next:
+        value.overall === "PASS"
+          ? "RecordGates with PASS"
+          : value.overall === "PLAN_INVALIDATED"
+            ? "RecordGates with BLOCKED; return to planning and explicitly approve the revised execution contract"
+            : ["BLOCKED_REPOSITORY_HYGIENE", "CONTROL_PLANE_OUTPUT"].includes(String(value.overall))
+              ? "RecordGates with BLOCKED; resolve the separate repository-safety issue before starting a new run"
+            : "RecordGates with FAIL; do not rerun unchanged gates",
     },
     null,
     2,
@@ -238,6 +251,7 @@ export const state = tool({
       "Start",
       "ApprovePlan",
       "BeginImplementation",
+      "InvalidatePlan",
       "RecordGates",
       "BeginCorrection",
       "Escalate",
@@ -256,7 +270,7 @@ export const state = tool({
     artifactPath: relativePath.optional(),
     verificationPath: relativePath.optional(),
     affectedModules: tool.schema.array(tool.schema.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)).min(1).optional(),
-    verdict: tool.schema.enum(["PASS", "FAIL", "ESCALATE"]).optional(),
+    verdict: tool.schema.enum(["PASS", "FAIL", "BLOCKED", "ESCALATE"]).optional(),
     reason: tool.schema.string().min(1).max(2000).optional(),
   },
   async execute(input, context) {
@@ -311,6 +325,22 @@ export const gate = tool({
     addSwitch(args, "-ContinueAfterFailure", input.continueAfterFailure)
     addSwitch(args, "-Force", input.force)
     return invokePowerShell("run-quality-gates.ps1", args, context)
+  },
+})
+
+export const dotnet_solution_add = tool({
+  description: "Add one approved .NET project to one approved solution during implementation.",
+  args: {
+    runId,
+    solution: relativePath,
+    project: relativePath,
+  },
+  async execute(input, context) {
+    return invokePowerShell(
+      "add-dotnet-project.ps1",
+      ["-RunId", input.runId, "-Solution", input.solution, "-Project", input.project],
+      context,
+    )
   },
 })
 

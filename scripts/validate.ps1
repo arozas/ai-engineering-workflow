@@ -42,6 +42,7 @@ foreach ($required in @(
     'evaluations\benchmark.schema.json',
     'evaluations\README.md',
     'evaluations\benchmark-suite-playbook.md',
+    'evaluations\scenarios\clients-api-crud-tests.md',
     'template\AGENTS.md',
     'template\opencode.json',
     'template\.ai\project.schema.json',
@@ -66,6 +67,7 @@ foreach ($required in @(
     'template\.ai\scripts\validate-project.ps1',
     'template\.ai\scripts\workflow-state.ps1',
     'template\.ai\scripts\run-quality-gates.ps1',
+    'template\.ai\scripts\add-dotnet-project.ps1',
     'template\.ai\scripts\record-review.ps1',
     'template\.ai\scripts\check-workflow-runtime.ps1',
     'template\.ai\scripts\validate-diagnosis.ps1',
@@ -100,6 +102,9 @@ foreach ($required in @(
     'template\.opencode\skills\project-profiler\SKILL.md',
     'template\.opencode\skills\project-skill-builder\SKILL.md',
     'template\.opencode\skills\architecture-simple-layered\SKILL.md',
+    'template\.opencode\skills\stack-dotnet\references\xunit-test-project.md',
+    'docs\reliability-and-preflight.md',
+    'evaluations\scenarios\clients-api-crud-tests.md',
     '.github\pull_request_template.md'
 )) {
     if (-not (Test-Path -LiteralPath (Join-Path $workflowRoot $required) -PathType Leaf)) {
@@ -148,7 +153,7 @@ $openCodeConfigContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'temp
 if ($openCodeConfigContent -notmatch [regex]::Escape('"action": "workflow_*", "resource": "*", "effect": "deny"')) {
     $errors += 'opencode.json must deny custom workflow tools by default.'
 }
-foreach ($managedScript in @('delivery-check.ps1', 'fast-path-check.ps1', 'validate-project.ps1', 'workflow-state.ps1', 'profile-project.ps1', 'validate-diagnosis.ps1', 'run-quality-gates.ps1', 'record-review.ps1')) {
+foreach ($managedScript in @('delivery-check.ps1', 'fast-path-check.ps1', 'validate-project.ps1', 'workflow-state.ps1', 'profile-project.ps1', 'validate-diagnosis.ps1', 'run-quality-gates.ps1', 'add-dotnet-project.ps1', 'record-review.ps1')) {
     $unsafePattern = '(?m)"action":\s*"shell"[^\r\n]*' + [regex]::Escape($managedScript) + '[^\r\n]*"effect":\s*"allow"'
     if ($openCodeConfigContent -match $unsafePattern) {
         $errors += "opencode.json must not automatically allow managed script $managedScript through a raw shell pattern."
@@ -268,7 +273,7 @@ foreach ($transportPolicyToken in @('initial callable-tool catalog', 'pwsh -NoPr
         $errors += "Deterministic transport policy is missing: $transportPolicyToken."
     }
 }
-foreach ($runtimeDoctorToken in @('Get-Command opencode2 -All', 'Multiple opencode2 commands', 'minimumMajor', 'pwsh -NoProfile -File .ai/scripts/check-workflow-runtime.ps1')) {
+foreach ($runtimeDoctorToken in @('Get-Command opencode2 -All', 'Multiple opencode2 commands', 'minimumMajor', 'selectedVersion', 'resolvedOpenCode', 'recommendedCommand', 'pwsh -NoProfile -File .ai/scripts/check-workflow-runtime.ps1')) {
     if ($runtimeDoctorScriptContent -notmatch [regex]::Escape($runtimeDoctorToken) -and $runtimeDoctorCommandContent -notmatch [regex]::Escape($runtimeDoctorToken)) {
         $errors += "Runtime preflight contract is missing: $runtimeDoctorToken."
     }
@@ -285,6 +290,7 @@ foreach ($agentToolRequirement in @{
     'orchestrator workflow_bootstrap_prepare' = @($orchestratorAgentContent, 'workflow_bootstrap_prepare')
     'orchestrator workflow_bootstrap_apply' = @($orchestratorAgentContent, 'workflow_bootstrap_apply')
     'developer workflow_gate' = @($developerAgentContent, 'workflow_gate')
+    'developer workflow_dotnet_solution_add' = @($developerAgentContent, 'workflow_dotnet_solution_add')
     'quick-fix workflow_fast_path' = @($quickFixAgentContent, 'workflow_fast_path')
     'quick-fix workflow_state' = @($quickFixAgentContent, 'workflow_state')
     'quick-fix workflow_next' = @($quickFixAgentContent, 'workflow_next')
@@ -307,7 +313,7 @@ if ($quickReviewerAgentContent -match '(?ms)- action:\s*(workflow_state|workflow
 }
 $qualityRunnerContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\run-quality-gates.ps1') -Raw
 $workflowStateContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\workflow-state.ps1') -Raw
-foreach ($requiredRunnerToken in @('quality-gates.schema.json', 'task-verification.schema.json', 'verificationSha256', 'startedWorktreeFingerprint', 'runnerSha256', 'configuredCommandCount', 'qualityPlanSha256', 'workflow-run.schema.json', 'RunId', '[switch]$Force', 'Invalid or stale runtime evidence is replaced')) {
+foreach ($requiredRunnerToken in @('quality-gates.schema.json', 'task-verification.schema.json', 'verificationSha256', 'startedWorktreeFingerprint', 'runnerSha256', 'configuredCommandCount', 'qualityPlanSha256', 'workflow-run.schema.json', 'RunId', '[switch]$Force', 'Invalid or stale runtime evidence is replaced', 'BLOCKED_REPOSITORY_HYGIENE', 'CONTROL_PLANE_OUTPUT', 'PLAN_INVALIDATED', 'Get-RepositoryHygiene', 'Get-WorktreeChangeEvidence')) {
     if ($qualityRunnerContent -notmatch [regex]::Escape($requiredRunnerToken)) {
         $errors += "Quality-gate runner is missing deterministic evidence field or check: $requiredRunnerToken."
     }
@@ -319,9 +325,21 @@ $runnerPreamble = $qualityRunnerContent.Substring(0, $qualityRunnerContent.Index
 if ($runnerPreamble -match '\$ModuleId') {
     $errors += 'Quality-gate runner must derive modules from persisted run state, not caller-selected ModuleId input.'
 }
-foreach ($requiredStateToken in @('Resolve-RunRuntimeArtifact', 'Get-TaskVerification', 'task-verification.schema.json', 'verificationSha256', 'Get-ValidatedGateEvidence', 'Get-ValidatedReviewEvidence', 'Get-ValidatedBranchEvidence', 'Get-ValidatedCommitEvidence', 'Get-ValidatedPublishEvidence', 'Get-ValidatedPullRequestEvidence', 'ls-remote', 'ghCommand.Source pr view', 'Get-ControlPlaneFingerprint', 'Assert-ControlPlane', 'affectedModuleIds', 'matrixSha256', 'Quality-gate command mismatch', 'validate-commit-message.ps1')) {
+foreach ($requiredStateToken in @('Resolve-RunRuntimeArtifact', 'Get-TaskVerification', 'task-verification.schema.json', 'verificationSha256', 'Get-ValidatedGateEvidence', 'Get-ValidatedReviewEvidence', 'Get-ValidatedBranchEvidence', 'Get-ValidatedCommitEvidence', 'Get-ValidatedPublishEvidence', 'Get-ValidatedPullRequestEvidence', 'ls-remote', 'ghCommand.Source pr view', 'Get-ControlPlaneFingerprint', 'Assert-ControlPlane', 'affectedModuleIds', 'matrixSha256', 'Quality-gate command mismatch', 'validate-commit-message.ps1', 'GATE_BLOCKED', 'PLAN_INVALIDATED', 'InvalidatePlan')) {
     if ($workflowStateContent -notmatch [regex]::Escape($requiredStateToken)) {
         $errors += "Workflow state is missing deterministic protection: $requiredStateToken."
+    }
+}
+$verificationSchemaContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\task-verification.schema.json') -Raw
+foreach ($executionContractToken in @('"const": 2', '"expectedChanges"', '"dependencies"', '"unresolvedDecisions"', '"maxItems": 0', '"estimatedChanges"')) {
+    if ($verificationSchemaContent -notmatch [regex]::Escape($executionContractToken)) {
+        $errors += "Task verification schema is missing execution-contract field: $executionContractToken."
+    }
+}
+$reliabilityDocContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'docs\reliability-and-preflight.md') -Raw
+foreach ($reliabilityToken in @('BLOCKED_REPOSITORY_HYGIENE', 'CONTROL_PLANE_OUTPUT', 'PLAN_INVALIDATED', 'workflow_dotnet_solution_add', 'recommendedCommand')) {
+    if ($reliabilityDocContent -notmatch [regex]::Escape($reliabilityToken)) {
+        $errors += "Reliability documentation is missing contract: $reliabilityToken."
     }
 }
 if ($typedToolContent -match '(?s)export const state = tool\(\{.*?action:\s*tool\.schema\.enum\(\[[^\]]*"RecordReview"') {
@@ -345,6 +363,12 @@ foreach ($scriptContract in @{
         $errors += "$($scriptContract.Key) contract is missing."
     }
 }
+$dotnetSolutionScriptContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'template\.ai\scripts\add-dotnet-project.ps1') -Raw
+foreach ($dotnetSolutionToken in @('schema-version-2 execution contract', 'dotnetCommand.Source sln $solutionPath add $projectPath', 'Solution is outside the approved expectedChanges', 'Project is outside the approved expectedChanges')) {
+    if ($dotnetSolutionScriptContent -notmatch [regex]::Escape($dotnetSolutionToken)) {
+        $errors += "Managed .NET solution helper is missing contract: $dotnetSolutionToken."
+    }
+}
 
 foreach ($onboardingScript in @('scripts\install.ps1', 'scripts\new-project.ps1')) {
     $onboardingContent = Get-Content -LiteralPath (Join-Path $workflowRoot $onboardingScript) -Raw
@@ -356,7 +380,7 @@ foreach ($onboardingScript in @('scripts\install.ps1', 'scripts\new-project.ps1'
     }
 }
 $openCodeSmokeContent = Get-Content -LiteralPath (Join-Path $workflowRoot 'scripts\smoke-opencode.ps1') -Raw
-foreach ($smokeToken in @('opencode2', 'AllowLegacyOpenCodeFallback', 'RequireRuntimeDiscovery', 'runtime discovery is required', 'SelfTest', 'OpenCode smoke helper self-test passed', 'Get-WindowsCommandInvocation', 'Get-WorkflowToolNamesFromSource', 'Get-StaticMarkdownDefinitionNames', 'static definition fallback', 'static export fallback', '/api/health', '/global/health', '/api/agent', '/api/command', '/api/experimental/tool/ids', 'directory=', 'Authorization', '<redacted>', 'workflow_state', 'workflow_next', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_bootstrap_prepare', 'workflow_bootstrap_apply')) {
+foreach ($smokeToken in @('opencode2', 'AllowLegacyOpenCodeFallback', 'RequireRuntimeDiscovery', 'runtime discovery is required', 'SelfTest', 'OpenCode smoke helper self-test passed', 'Get-WindowsCommandInvocation', 'Get-WorkflowToolNamesFromSource', 'Get-StaticMarkdownDefinitionNames', 'static definition fallback', 'static export fallback', '/api/health', '/global/health', '/api/agent', '/api/command', '/api/experimental/tool/ids', 'directory=', 'Authorization', '<redacted>', 'workflow_state', 'workflow_next', 'workflow_standard_review', 'workflow_quick_review', 'workflow_gate', 'workflow_dotnet_solution_add', 'workflow_bootstrap_prepare', 'workflow_bootstrap_apply')) {
     if ($openCodeSmokeContent -notmatch [regex]::Escape($smokeToken)) {
         $errors += "OpenCode smoke test is missing discovery check: $smokeToken."
     }
@@ -450,6 +474,19 @@ foreach ($orchestratorBootstrapToken in @('For `/ai-bootstrap`, follow the comma
 foreach ($smallModelContract in @('workflow_next', 'Do not repeat an unchanged state, profile, gate, review, or exploration call', 'evidence-reader')) {
     if ($orchestratorAgentContent -notmatch [regex]::Escape($smallModelContract)) {
         $errors += "orchestrator is missing bounded-execution guidance: $smallModelContract."
+    }
+}
+foreach ($fastPathContract in @(
+    (Join-Path $workflowRoot 'template\.opencode\commands\quick-fix.md'),
+    (Join-Path $workflowRoot 'template\.opencode\commands\small-task.md'),
+    (Join-Path $workflowRoot 'template\.opencode\skills\fast-path\SKILL.md'),
+    (Join-Path $workflowRoot 'template\.opencode\agents\quick-fix.md')
+)) {
+    $fastPathContractContent = Get-Content -LiteralPath $fastPathContract -Raw
+    foreach ($token in @('schema-version-2', 'unresolvedDecisions')) {
+        if ($fastPathContractContent -notmatch [regex]::Escape($token)) {
+            $errors += "Fast-path definition is missing the execution contract token '$token': $fastPathContract"
+        }
     }
 }
 foreach ($nextAwareCommand in @('run-status', 'implement', 'test', 'review', 'delivery-check')) {

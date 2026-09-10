@@ -4,6 +4,8 @@ This directory defines the evidence contract for measuring whether the workflow 
 
 Use [`benchmark-suite-playbook.md`](benchmark-suite-playbook.md) to define the first real suite. Do not invent measurements; record only provider or OpenCode usage observed during comparable runs.
 
+Use [`scenarios/clients-api-crud-tests.md`](scenarios/clients-api-crud-tests.md) to evaluate the version 2 execution contract, .NET test-project guidance, repository-hygiene preflight, control-plane output detection, and bounded behavior with both economical and frontier models.
+
 Use the same repository state, requirement, provider account, model assignments, and acceptance tests for each compared path. A useful initial suite contains five bounded bug fixes and five medium features. Run each scenario through `manual`, `standard`, and, only when eligible, `fast-path`.
 
 Record actual provider or OpenCode usage; never estimate or invent token counts. Store benchmark result files outside this repository when they contain proprietary prompts, source excerpts, account prices, or internal defect information. The schema contains no secrets and can be copied wherever the measurements are kept.

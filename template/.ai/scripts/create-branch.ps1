@@ -53,8 +53,8 @@ if ($status.Count -gt 0) {
 & $gitCommand.Source -C $repositoryRoot show-ref --verify --quiet ("refs/heads/" + $Name)
 if ($LASTEXITCODE -eq 0) { throw "Local branch already exists: $Name" }
 
-& $gitCommand.Source -C $repositoryRoot switch -c $Name
-if ($LASTEXITCODE -ne 0) { throw "Git failed to create branch: $Name" }
+$switchOutput = @(& $gitCommand.Source -C $repositoryRoot switch -c $Name 2>&1)
+if ($LASTEXITCODE -ne 0) { throw "Git failed to create branch: $Name`n$($switchOutput -join "`n")" }
 
 $head = (& $gitCommand.Source -C $repositoryRoot rev-parse HEAD).Trim()
 $runtimeRoot = Join-Path $repositoryRoot ".ai\runtime\$RunId"
@@ -83,9 +83,24 @@ finally {
 }
 
 try {
-    & $stateScript -Action RecordBranch -RunId $RunId -ArtifactPath $evidencePath | Out-Null
+    $recordedStateJson = ((& $stateScript -Action RecordBranch -RunId $RunId -ArtifactPath $evidencePath -Transport deterministic-script) -join "`n")
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($recordedStateJson)) {
+        throw 'RecordBranch did not return persisted state.'
+    }
+    $recordedState = $recordedStateJson | ConvertFrom-Json
 }
 catch {
     throw "Branch '$Name' was created, but its workflow evidence could not be recorded: $($_.Exception.Message)"
 }
-Write-Output "Created and recorded branch '$Name' at $head for workflow run '$RunId'."
+
+[ordered]@{
+    verdict = 'BRANCH_CREATED'
+    runId = $RunId
+    branch = $Name
+    previousBranch = $previousBranch
+    sha = $head.ToLowerInvariant()
+    artifact = '.ai/runtime/' + $RunId + '/branch.json'
+    artifactSha256 = (Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    status = [string]$recordedState.status
+    lastTransitionTransport = [string]$recordedState.lastTransitionTransport
+} | ConvertTo-Json -Depth 4

@@ -138,6 +138,59 @@ function Get-ModuleLanguages([string[]]$ModuleFiles) {
     )
 }
 
+function Get-RepositoryHygieneRisks([object[]]$Modules) {
+    $tracked = @(& $gitCommand.Source -C $repositoryRoot ls-files --)
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect tracked files for repository hygiene.' }
+    $tracked = @($tracked | ForEach-Object { ([string]$_).Replace('\', '/') })
+    $risks = [Collections.Generic.List[string]]::new()
+    $seen = @{}
+    foreach ($module in $Modules) {
+        $modulePath = ([string]$module.path).Replace('\', '/').TrimEnd('/')
+        $tokens = @(@($module.languages) + @($module.frameworks) | ForEach-Object { ([string]$_).ToLowerInvariant() })
+        $directories = [Collections.Generic.List[string]]::new()
+        if (@($tokens | Where-Object { $_ -in @('csharp', 'fsharp', 'visual-basic', 'aspnetcore', 'dotnet') }).Count -gt 0) {
+            $directories.Add('bin')
+            $directories.Add('obj')
+        }
+        if (@($tokens | Where-Object { $_ -in @('javascript', 'typescript', 'node', 'react') }).Count -gt 0) { $directories.Add('node_modules') }
+        if ($tokens -contains 'python') {
+            $directories.Add('__pycache__')
+            $directories.Add('.pytest_cache')
+        }
+        if (@($tokens | Where-Object { $_ -in @('java', 'kotlin', 'spring') }).Count -gt 0) {
+            $directories.Add('target')
+            $directories.Add('build')
+        }
+        if (($modulePath -eq '.' -or [string]::IsNullOrWhiteSpace($modulePath)) -and $tokens -contains 'aspnetcore') {
+            $risks.Add("Control-plane output risk: a root ASP.NET Core project can include 'opencode.json' in build or publish output. Add an explicit approved content exclusion before delivery if the deterministic gate reports CONTROL_PLANE_OUTPUT.")
+        }
+        foreach ($directory in @($directories | Sort-Object -Unique)) {
+            $prefix = if ([string]::IsNullOrWhiteSpace($modulePath) -or $modulePath -eq '.') { '' } else { $modulePath + '/' }
+            $directoryPath = $prefix + $directory
+            $pattern = '^(?:' + [regex]::Escape($prefix) + ')(?:.*/)?' + [regex]::Escape($directory) + '/'
+            $trackedMatches = @($tracked | Where-Object { $_ -match $pattern })
+            if ($trackedMatches.Count -gt 0) {
+                $key = 'tracked:' + $directoryPath.ToLowerInvariant()
+                if (-not $seen.ContainsKey($key)) {
+                    $seen[$key] = $true
+                    $sample = @($trackedMatches | Select-Object -First 3) -join ', '
+                    $risks.Add("Repository hygiene blocks reliable gates: $($trackedMatches.Count) generated file(s) are tracked under '$directoryPath/' (for example: $sample).")
+                }
+            }
+            $probe = $directoryPath + '/.ai-workflow-ignore-probe'
+            & $gitCommand.Source -C $repositoryRoot check-ignore --no-index --quiet -- $probe
+            if ($LASTEXITCODE -ne 0) {
+                $key = 'ignore:' + $directoryPath.ToLowerInvariant()
+                if (-not $seen.ContainsKey($key)) {
+                    $seen[$key] = $true
+                    $risks.Add("Repository hygiene warning: '$directoryPath/' is not ignored and build commands can invalidate deterministic gate evidence.")
+                }
+            }
+        }
+    }
+    return @($risks)
+}
+
 function Test-DotnetTestProject([string]$RelativePath) {
     if ($RelativePath -notmatch '\.(csproj|fsproj|vbproj)$') { return $false }
     return Test-FileContains -RelativePath $RelativePath -Pattern '<IsTestProject>\s*true\s*</IsTestProject>|Microsoft\.NET\.Test\.Sdk|(?:xunit|nunit|mstest)'
@@ -446,6 +499,7 @@ foreach ($candidate in @($profile.moduleCandidates)) {
     })
     $moduleEvidence.Add("- $moduleId at ${modulePath}: manifests $(@($candidate.evidence) -join ', '); languages $(@($languages) -join ', '); frameworks $(if (@($frameworks).Count -gt 0) { @($frameworks) -join ', ' } else { 'none proven' }); architecture $($architecture.rationale)")
 }
+$repositoryHygieneRisks = @(Get-RepositoryHygieneRisks -Modules @($modules))
 
 $diagnosticCommands = @()
 foreach ($module in @($modules)) {
@@ -666,6 +720,7 @@ $dryRun = ($dryRunOutput -join "`n") | ConvertFrom-Json
         if (@($profile.ciFiles).Count -eq 0) { 'No CI/CD files were detected.' }
         if (@($profile.conventionFiles).Count -eq 0) { 'No convention files were detected; lint/format commands remain empty unless explicit evidence is added.' }
         foreach ($qualityRisk in $script:qualityInferenceRisks) { [string]$qualityRisk }
+        foreach ($hygieneRisk in $repositoryHygieneRisks) { [string]$hygieneRisk }
     )
     next = 'Review or edit .ai/bootstrap-proposal/, then run /ai-bootstrap-apply.'
 } | ConvertTo-Json -Depth 6

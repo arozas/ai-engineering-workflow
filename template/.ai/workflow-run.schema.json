@@ -30,6 +30,8 @@
         "IMPLEMENTING",
         "GATES_PASSED",
         "GATE_FAILED",
+        "GATE_BLOCKED",
+        "PLAN_INVALIDATED",
         "REVIEW_FAILED",
         "READY_FOR_DELIVERY",
         "COMMITTED",
@@ -91,7 +93,7 @@
       "properties": {
         "path": { "type": "string", "pattern": "^[^\\/]+$" },
         "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "verdict": { "enum": ["PASS", "FAIL", "ESCALATE"] }
+        "verdict": { "enum": ["PASS", "FAIL", "BLOCKED", "ESCALATE"] }
       }
     }
   }

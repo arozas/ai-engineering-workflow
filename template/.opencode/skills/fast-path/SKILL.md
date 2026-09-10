@@ -57,7 +57,7 @@ Estimate classification is deterministic for declared evidence. Semantic risks s
 
 ## Micro-plan and approval
 
-Persist one compact micro-plan and `.ai/runtime/<run-id>/verification.json`. The manifest must contain each mandatory command not already configured for the affected module and may be empty only when configured gates fully prove the acceptance criteria. Present:
+Persist one compact micro-plan and a schema-version-2 `.ai/runtime/<run-id>/verification.json` execution contract. It must freeze the affected module, exact expected file actions, dependencies (normally empty because fast path forbids adding them), closed decisions, an empty `unresolvedDecisions` array, constraints, estimates, and each mandatory command not already configured for the affected module. The command array may be empty only when configured gates fully prove the acceptance criteria. Present:
 
 - task type: quick fix or small task
 - evidence and root cause, when applicable

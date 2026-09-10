@@ -11,6 +11,7 @@ This directory contains the detailed operating and design documentation for AI E
 | [Workflows](workflows.md) | You are deciding between standard work, fast path, diagnosis, or guarded delivery. |
 | [Project context](project-context.md) | You are bootstrapping or refreshing modules, stacks, architectures, quality commands, or Azure DevOps integration. |
 | [Security](security.md) | You need the permission model, typed/script transport boundary, deterministic evidence rules, or threat model. |
+| [Reliability and preflight](reliability-and-preflight.md) | You need execution contracts, repository-hygiene blockers, .NET test-project guidance, or Windows launcher diagnostics. |
 | [Models and efficiency](models-and-efficiency.md) | You are assigning model classes to agents or optimizing context and token usage. |
 | [Extending and validation](extending-and-validation.md) | You are adding a preset, skill, agent, command, tool, schema, or release. |
 | [Troubleshooting](troubleshooting.md) | Installation, bootstrap, state, gate, OpenCode, or delivery checks fail. |

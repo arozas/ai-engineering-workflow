@@ -55,6 +55,13 @@ function Get-TaskVerification(
     if ([string]$manifest.runId -ne $ExpectedRunId) {
         throw 'Run-specific verification manifest belongs to a different workflow run.'
     }
+    if ([int]$manifest.schemaVersion -eq 2) {
+        $contractModules = @($manifest.affectedModules | ForEach-Object { [string]$_ } | Sort-Object -Unique)
+        $approvedModules = @($AffectedModuleIds | ForEach-Object { [string]$_ } | Sort-Object -Unique)
+        if (($contractModules -join "`n") -ne ($approvedModules -join "`n")) {
+            throw 'Execution contract affectedModules no longer match the approved affected modules.'
+        }
+    }
     $unsafeCommandPattern = '(?i)(?:^|\s)(?:git\s+(?:add|commit|push|merge|rebase|reset|clean|tag|branch|switch|checkout)|gh\s+(?:pr\s+(?:create|edit|ready|merge)|release|secret|variable|workflow\s+run)|kubectl\s+(?:apply|delete|patch|scale|rollout|exec|cp)|terraform\s+(?:apply|destroy|import|taint|untaint)|az\s+deployment)(?:\s|$)'
     $seen = @{}
     foreach ($record in @($manifest.commands)) {
@@ -160,6 +167,131 @@ function Get-WorktreeFingerprint([string]$RepositoryRoot) {
         $lockPath = $temporaryIndex + '.lock'
         if (Test-Path -LiteralPath $lockPath) { Remove-Item -LiteralPath $lockPath -Force }
     }
+}
+
+function Get-WorktreePathSnapshot([string]$RepositoryRoot) {
+    & git -C $RepositoryRoot rev-parse --verify HEAD *> $null
+    $tracked = if ($LASTEXITCODE -eq 0) {
+        @(& git -C $RepositoryRoot diff --name-only HEAD --)
+    }
+    else {
+        @(& git -C $RepositoryRoot diff --cached --name-only --)
+    }
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to list tracked worktree changes.' }
+    $untracked = @(& git -C $RepositoryRoot ls-files --others --exclude-standard --)
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to list untracked worktree changes.' }
+    return [pscustomobject]@{
+        Tracked = @($tracked | ForEach-Object { ([string]$_).Replace('\', '/') } | Sort-Object -Unique)
+        Untracked = @($untracked | ForEach-Object { ([string]$_).Replace('\', '/') } | Sort-Object -Unique)
+    }
+}
+
+function ConvertTo-EvidenceSnapshot([object]$Snapshot) {
+    $maximumPaths = 200
+    $tracked = @($Snapshot.Tracked)
+    $untracked = @($Snapshot.Untracked)
+    return [ordered]@{
+        trackedCount = $tracked.Count
+        untrackedCount = $untracked.Count
+        tracked = @($tracked | Select-Object -First $maximumPaths)
+        untracked = @($untracked | Select-Object -First $maximumPaths)
+        truncated = ($tracked.Count -gt $maximumPaths -or $untracked.Count -gt $maximumPaths)
+    }
+}
+
+function Get-WorktreeChangeEvidence([object]$Before, [object]$After) {
+    $beforePaths = @(@($Before.Tracked) + @($Before.Untracked) | Sort-Object -Unique)
+    $afterPaths = @(@($After.Tracked) + @($After.Untracked) | Sort-Object -Unique)
+    return [ordered]@{
+        before = ConvertTo-EvidenceSnapshot -Snapshot $Before
+        after = ConvertTo-EvidenceSnapshot -Snapshot $After
+        addedDuringRun = @($afterPaths | Where-Object { $beforePaths -notcontains $_ } | Select-Object -First 200)
+        removedDuringRun = @($beforePaths | Where-Object { $afterPaths -notcontains $_ } | Select-Object -First 200)
+    }
+}
+
+function Get-RepositoryHygiene([string]$RepositoryRoot, [object]$Project) {
+    $trackedFiles = @(& git -C $RepositoryRoot ls-files --)
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect tracked files for repository hygiene.' }
+    $trackedFiles = @($trackedFiles | ForEach-Object { ([string]$_).Replace('\', '/') } | Sort-Object -Unique)
+    $issues = [Collections.Generic.List[object]]::new()
+    $seen = @{}
+
+    foreach ($module in @($Project.modules)) {
+        $modulePath = ([string]$module.path).Replace('\', '/').TrimEnd('/')
+        $stackTokens = @(@($module.languages) + @($module.frameworks) | ForEach-Object { ([string]$_).ToLowerInvariant() })
+        $generatedDirectories = [Collections.Generic.List[string]]::new()
+        if (@($stackTokens | Where-Object { $_ -in @('csharp', 'fsharp', 'visual-basic', 'aspnetcore', 'dotnet') }).Count -gt 0) {
+            $generatedDirectories.Add('bin')
+            $generatedDirectories.Add('obj')
+        }
+        if (@($stackTokens | Where-Object { $_ -in @('javascript', 'typescript', 'node', 'react') }).Count -gt 0) { $generatedDirectories.Add('node_modules') }
+        if ($stackTokens -contains 'python') {
+            $generatedDirectories.Add('__pycache__')
+            $generatedDirectories.Add('.pytest_cache')
+        }
+        if (@($stackTokens | Where-Object { $_ -in @('java', 'kotlin', 'spring') }).Count -gt 0) {
+            $generatedDirectories.Add('target')
+            $generatedDirectories.Add('build')
+        }
+
+        foreach ($directory in @($generatedDirectories | Sort-Object -Unique)) {
+            $prefix = if ([string]::IsNullOrWhiteSpace($modulePath) -or $modulePath -eq '.') { '' } else { $modulePath + '/' }
+            $directoryPath = $prefix + $directory
+            $pathPattern = '^(?:' + [regex]::Escape($prefix) + ')(?:.*/)?' + [regex]::Escape($directory) + '/'
+            foreach ($trackedPath in @($trackedFiles | Where-Object { $_ -match $pathPattern } | Select-Object -First 100)) {
+                $key = 'tracked:' + $trackedPath.ToLowerInvariant()
+                if (-not $seen.ContainsKey($key)) {
+                    $seen[$key] = $true
+                    $issues.Add([ordered]@{
+                        code = 'TRACKED_GENERATED_ARTIFACT'
+                        path = $trackedPath
+                        message = "Generated output is tracked by Git. Remove it from version control through a separate reviewed repository-hygiene change."
+                    })
+                }
+            }
+
+            $ignoreProbe = $directoryPath + '/.ai-workflow-ignore-probe'
+            & git -C $RepositoryRoot check-ignore --no-index --quiet -- $ignoreProbe
+            if ($LASTEXITCODE -ne 0) {
+                $key = 'ignore:' + $directoryPath.ToLowerInvariant()
+                if (-not $seen.ContainsKey($key)) {
+                    $seen[$key] = $true
+                    $issues.Add([ordered]@{
+                        code = 'GENERATED_PATH_NOT_IGNORED'
+                        path = $directoryPath + '/'
+                        message = 'Generated output is not ignored. Add an appropriate repository ignore rule before running build commands.'
+                    })
+                }
+            }
+        }
+    }
+
+    return [ordered]@{
+        status = if ($issues.Count -gt 0) { 'BLOCKED' } else { 'PASS' }
+        issues = @($issues)
+    }
+}
+
+function Get-ControlPlaneOutputPaths([string]$RepositoryRoot, [object]$Project) {
+    $matches = [Collections.Generic.List[string]]::new()
+    foreach ($module in @($Project.modules)) {
+        $moduleRoot = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot ([string]$module.path)))
+        foreach ($directory in @('bin', 'obj', 'dist', 'target', 'build')) {
+            $outputRoot = Join-Path $moduleRoot $directory
+            if (-not (Test-Path -LiteralPath $outputRoot -PathType Container)) { continue }
+            foreach ($file in @(Get-ChildItem -LiteralPath $outputRoot -Recurse -File -ErrorAction SilentlyContinue)) {
+                $relative = ([IO.Path]::GetRelativePath($RepositoryRoot, $file.FullName)).Replace('\', '/')
+                if ($file.Name -in @('opencode.json', 'AGENTS.md') -or $relative -match '(?:^|/)(?:\.ai|\.opencode)(?:/|$)') {
+                    $matches.Add($relative)
+                    if ($matches.Count -ge 100) { break }
+                }
+            }
+            if ($matches.Count -ge 100) { break }
+        }
+        if ($matches.Count -ge 100) { break }
+    }
+    return @($matches | Sort-Object -Unique)
 }
 
 function Get-CapturedText([string]$Value) {
@@ -291,6 +423,20 @@ try {
     }
 
     $startedFingerprint = Get-WorktreeFingerprint -RepositoryRoot $repositoryRoot
+    $startedPathSnapshot = Get-WorktreePathSnapshot -RepositoryRoot $repositoryRoot
+    $repositoryHygiene = Get-RepositoryHygiene -RepositoryRoot $repositoryRoot -Project $project
+    $planScope = [ordered]@{ status = 'PASS'; unexpectedPaths = @(); missingPaths = @() }
+    if ([int]$verification.Manifest.schemaVersion -eq 2) {
+        $actualPaths = @(@($startedPathSnapshot.Tracked) + @($startedPathSnapshot.Untracked) | Sort-Object -Unique)
+        $expectedPaths = @($verification.Manifest.expectedChanges | ForEach-Object { ([string]$_.path).Replace('\', '/') } | Sort-Object -Unique)
+        $unexpectedPaths = @($actualPaths | Where-Object { $candidate = $_; @($expectedPaths | Where-Object { [string]::Equals($_, $candidate, [StringComparison]::OrdinalIgnoreCase) }).Count -eq 0 })
+        $missingPaths = @($expectedPaths | Where-Object { $candidate = $_; @($actualPaths | Where-Object { [string]::Equals($_, $candidate, [StringComparison]::OrdinalIgnoreCase) }).Count -eq 0 })
+        $planScope = [ordered]@{
+            status = if ($unexpectedPaths.Count -gt 0 -or $missingPaths.Count -gt 0) { 'INVALID' } else { 'PASS' }
+            unexpectedPaths = @($unexpectedPaths | Select-Object -First 200)
+            missingPaths = @($missingPaths | Select-Object -First 200)
+        }
+    }
     if (-not $Force -and (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
         try {
             $existingJson = Get-Content -LiteralPath $outputPath -Raw
@@ -309,6 +455,7 @@ try {
                     Write-Output $existingJson
                     if ([string]$existing.overall -eq 'PASS') { exit 0 }
                     if ([string]$existing.overall -eq 'INCOMPLETE_CONFIGURATION') { exit 2 }
+                    if ([string]$existing.overall -in @('BLOCKED_REPOSITORY_HYGIENE', 'CONTROL_PLANE_OUTPUT', 'PLAN_INVALIDATED')) { exit 4 }
                     exit 1
                 }
             }
@@ -320,6 +467,64 @@ try {
 
     $generatedAt = [DateTime]::UtcNow.ToString('o')
     $moduleResults = @()
+    if ([string]$planScope.status -eq 'INVALID' -or [string]$repositoryHygiene.status -eq 'BLOCKED') {
+        foreach ($module in $qualityPlan.Modules) {
+            $modulePath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot ([string]$module.path)))
+            $configuredCount = 0
+            $phaseResults = @()
+            foreach ($phase in @($module.phases)) {
+                $commands = @($phase.commands | ForEach-Object { [string]$_ })
+                $configuredCount += $commands.Count
+                $commandResults = @($commands | ForEach-Object { New-NotRunResult -Command $_ -WorkingDirectory $modulePath })
+                $phaseResults += [ordered]@{ name = [string]$phase.name; status = 'NOT_RUN'; commands = $commandResults }
+            }
+            $moduleResults += [ordered]@{
+                id = [string]$module.id
+                path = ([string]$module.path).Replace('\', '/')
+                overall = 'BLOCKED'
+                configuredCommandCount = $configuredCount
+                phases = $phaseResults
+            }
+        }
+
+        $completedFingerprint = Get-WorktreeFingerprint -RepositoryRoot $repositoryRoot
+        $completedPathSnapshot = Get-WorktreePathSnapshot -RepositoryRoot $repositoryRoot
+        $artifact = [ordered]@{
+            schemaVersion = 1
+            runId = $RunId
+            generatedAtUtc = $generatedAt
+            completedAtUtc = [DateTime]::UtcNow.ToString('o')
+            projectPath = '.ai/project.json'
+            projectSha256 = Get-FileSha256 -Path $projectPath
+            runnerSha256 = Get-FileSha256 -Path $runnerPath
+            qualityPlanSha256 = $qualityPlan.MatrixSha256
+            startedWorktreeFingerprint = $startedFingerprint
+            worktreeFingerprint = $completedFingerprint
+            worktreeStable = $startedFingerprint -eq $completedFingerprint
+            overall = if ([string]$planScope.status -eq 'INVALID') { 'PLAN_INVALIDATED' } else { 'BLOCKED_REPOSITORY_HYGIENE' }
+            repositoryHygiene = $repositoryHygiene
+            planScope = $planScope
+            worktreeChanges = Get-WorktreeChangeEvidence -Before $startedPathSnapshot -After $completedPathSnapshot
+            controlPlaneOutputPaths = @()
+            modules = $moduleResults
+        }
+        $json = $artifact | ConvertTo-Json -Depth 12
+        $gateSchema = Get-Content -LiteralPath $gateSchemaPath -Raw
+        if (-not ($json | Test-Json -Schema $gateSchema -ErrorAction Stop)) { throw 'Generated repository-hygiene evidence failed schema validation.' }
+        $outputDirectory = Split-Path -Parent $outputPath
+        if (-not (Test-Path -LiteralPath $outputDirectory -PathType Container)) { New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null }
+        $temporaryPath = $outputPath + '.tmp'
+        try {
+            Set-Content -LiteralPath $temporaryPath -Value $json -Encoding utf8
+            Move-Item -LiteralPath $temporaryPath -Destination $outputPath -Force
+        }
+        finally {
+            if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force }
+        }
+        Write-Output $json
+        exit 4
+    }
+
     foreach ($module in $qualityPlan.Modules) {
         $modulePath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot ([string]$module.path)))
         if ($modulePath -ne $repositoryRoot -and
@@ -373,8 +578,13 @@ try {
     }
 
     $completedFingerprint = Get-WorktreeFingerprint -RepositoryRoot $repositoryRoot
+    $completedPathSnapshot = Get-WorktreePathSnapshot -RepositoryRoot $repositoryRoot
     $worktreeStable = $startedFingerprint -eq $completedFingerprint
-    $overall = if (-not $worktreeStable -or @($moduleResults | Where-Object { $_.overall -eq 'FAIL' }).Count -gt 0) {
+    $controlPlaneOutputPaths = @(Get-ControlPlaneOutputPaths -RepositoryRoot $repositoryRoot -Project $project)
+    $overall = if ($controlPlaneOutputPaths.Count -gt 0) {
+        'CONTROL_PLANE_OUTPUT'
+    }
+    elseif (-not $worktreeStable -or @($moduleResults | Where-Object { $_.overall -eq 'FAIL' }).Count -gt 0) {
         'FAIL'
     }
     elseif (@($moduleResults | Where-Object { $_.overall -eq 'INCOMPLETE_CONFIGURATION' }).Count -gt 0) {
@@ -395,6 +605,10 @@ try {
         worktreeFingerprint = $completedFingerprint
         worktreeStable = $worktreeStable
         overall = $overall
+        repositoryHygiene = $repositoryHygiene
+        planScope = $planScope
+        worktreeChanges = Get-WorktreeChangeEvidence -Before $startedPathSnapshot -After $completedPathSnapshot
+        controlPlaneOutputPaths = $controlPlaneOutputPaths
         modules = $moduleResults
     }
     $json = $artifact | ConvertTo-Json -Depth 12
@@ -414,6 +628,7 @@ try {
     Write-Output $json
     if ($overall -eq 'PASS') { exit 0 }
     if ($overall -eq 'INCOMPLETE_CONFIGURATION') { exit 2 }
+    if ($overall -in @('BLOCKED_REPOSITORY_HYGIENE', 'CONTROL_PLANE_OUTPUT', 'PLAN_INVALIDATED')) { exit 4 }
     exit 1
 }
 catch {

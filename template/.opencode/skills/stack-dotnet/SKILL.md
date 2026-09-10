@@ -19,4 +19,6 @@ Read `global.json`, solution/project files, central package management, nullable
 - Keep public API and serialization behavior compatible unless change is approved.
 - Follow the repository's test framework and naming conventions.
 
+When an approved plan creates a new xUnit project, read and follow `references/xunit-test-project.md`. This recipe prevents root SDK projects from compiling nested test sources, requires an explicit xUnit global using, and keeps package versions and solution targets frozen in the execution contract.
+
 Use only quality commands established in `.ai/project.json`; do not invent `dotnet format`, warning flags, or test options.

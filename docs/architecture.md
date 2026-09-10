@@ -98,7 +98,7 @@ PLANNING
   -> PLAN_APPROVED
      -> PLAN_APPROVED + verified branch evidence (optional)
   -> IMPLEMENTING
-  -> GATES_PASSED or GATE_FAILED
+  -> GATES_PASSED, GATE_FAILED, GATE_BLOCKED, or PLAN_INVALIDATED
   -> READY_FOR_DELIVERY or REVIEW_FAILED
   -> COMMITTED
   -> PUBLISHED
@@ -120,7 +120,9 @@ A blocked diagnostic run may begin another explicitly approved bounded iteration
 
 ## Deterministic execution boundary
 
-OpenCode custom tools in `.opencode/tools/workflow.ts` expose typed operations such as `workflow_state`, `workflow_next`, `workflow_gate`, `workflow_standard_review`, `workflow_quick_review`, `workflow_fast_path`, `workflow_validate_project`, and `workflow_bootstrap_apply`. Each tool validates its arguments and starts PowerShell with an argument vector rather than constructing a shell command string. Model-facing state and gate responses are compact; complete evidence remains in persisted artifacts.
+OpenCode custom tools in `.opencode/tools/workflow.ts` expose typed operations such as `workflow_state`, `workflow_next`, `workflow_gate`, `workflow_dotnet_solution_add`, `workflow_standard_review`, `workflow_quick_review`, `workflow_fast_path`, `workflow_validate_project`, and `workflow_bootstrap_apply`. Each tool validates its arguments and starts PowerShell with an argument vector rather than constructing a shell command string. Model-facing state and gate responses are compact; complete evidence remains in persisted artifacts.
+
+New plans use a version 2 execution contract in `verification.json`. It freezes paths, dependencies, decisions, constraints, estimates, modules, and extra commands alongside the human-readable plan. Before running commands, the gate runner enforces that scope and repository hygiene. After running them, it checks that generated output did not capture the workflow control plane. The separate `GATE_FAILED`, `GATE_BLOCKED`, and `PLAN_INVALIDATED` states keep command defects, unsafe repository state, and obsolete approvals from entering the same correction loop.
 
 The same scripts form a compatibility transport when a preview runtime does not expose a typed tool. Agents inspect only the initial tool catalog, make at most one typed call, and on a genuine availability failure may run one exact `pwsh -NoProfile -File` command. They never search, compose shell text, retry, or use fallback after a semantic failure. State records which transport performed its last transition. This design requires no MCP server and keeps the deterministic state machine identical for small and large models.
 

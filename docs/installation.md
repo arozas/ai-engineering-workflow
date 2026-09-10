@@ -134,7 +134,7 @@ Presets are starting points, not evidence about an existing repository. Existing
 7. Run `/ai-bootstrap-apply` when the proposal is approved.
 8. Wait for `PROJECT_VALID` before using `/ticket`, `/diagnose`, or `/ai-refresh`.
 
-`/workflow-doctor` is model-free and read-only. It checks PowerShell 7, lists visible `opencode2` installation directories and shims, shows which command is selected, and warns when versions or executability differ. It does not change `PATH` or install software.
+`/workflow-doctor` is model-free and read-only. It checks PowerShell 7, lists visible `opencode2` installation directories and shims, selects a callable Windows `.cmd`/`.bat` launcher when available, reports both the selected and bare-command resolution, and warns when versions, execution policy, or executability differ. It returns a `recommendedCommand`; it does not change `PATH`, execution policy, or installed software.
 
 The bootstrap proposal is a draft only and is excluded from Local-mode application commits. Rerunning `/ai-bootstrap` with the same structural fingerprint validates and preserves the existing draft. If the repository fingerprint changed, bootstrap stops with `BOOTSTRAP_PROPOSAL_STALE`; correct or apply the draft deliberately, or use `/ai-bootstrap --force` to replace it. Approval applies to the draft files under `.ai/bootstrap-proposal/`; repository drift between proposal and persistence blocks the write.
 

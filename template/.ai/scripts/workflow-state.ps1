@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Start', 'ApprovePlan', 'RecordBranch', 'BeginImplementation', 'RecordGates', 'RecordReview', 'BeginCorrection', 'RecordDiagnosis', 'BeginDiagnosticIteration', 'RecordCommit', 'RecordPublish', 'RecordPullRequest', 'Escalate', 'Show', 'Validate')]
+    [ValidateSet('Start', 'ApprovePlan', 'RecordBranch', 'BeginImplementation', 'InvalidatePlan', 'RecordGates', 'RecordReview', 'BeginCorrection', 'RecordDiagnosis', 'BeginDiagnosticIteration', 'RecordCommit', 'RecordPublish', 'RecordPullRequest', 'Escalate', 'Show', 'Validate')]
     [string]$Action,
     [Parameter(Mandatory = $true)][ValidatePattern('^[a-z0-9][a-z0-9-]{2,63}$')][string]$RunId,
     [ValidateSet('standard', 'fast-path', 'diagnostic')][string]$WorkflowPath,
@@ -10,7 +10,7 @@ param(
     [string]$ArtifactPath,
     [string]$VerificationPath,
     [ValidateLength(1, 1000)][string]$AffectedModules,
-    [ValidateSet('PASS', 'FAIL', 'ESCALATE')][string]$Verdict,
+    [ValidateSet('PASS', 'FAIL', 'BLOCKED', 'ESCALATE')][string]$Verdict,
     [ValidateLength(1, 2000)][string]$Reason,
     [ValidateSet('typed-tool', 'deterministic-script')][string]$Transport = 'deterministic-script'
 )
@@ -155,6 +155,24 @@ function Get-TaskVerification(
     $manifest = $json | ConvertFrom-Json
     if ([string]$manifest.runId -ne $ExpectedRunId) {
         throw 'Run-specific verification manifest belongs to a different workflow run.'
+    }
+
+    if ([int]$manifest.schemaVersion -eq 2) {
+        $contractModules = @($manifest.affectedModules | ForEach-Object { [string]$_ } | Sort-Object -Unique)
+        $approvedModules = @($AffectedModuleIds | ForEach-Object { [string]$_ } | Sort-Object -Unique)
+        if (($contractModules -join "`n") -ne ($approvedModules -join "`n")) {
+            throw 'Execution contract affectedModules must exactly match ApprovePlan AffectedModules.'
+        }
+        $expectedPathSet = @{}
+        foreach ($change in @($manifest.expectedChanges)) {
+            $normalizedPath = ([string]$change.path).Replace('\', '/')
+            if ($normalizedPath -match '^(?:AGENTS\.md|opencode\.json|\.ai(?:/|$)|\.opencode(?:/|$))') {
+                throw "Execution contract cannot place workflow control-plane content in implementation scope: $normalizedPath"
+            }
+            $pathKey = $normalizedPath.ToLowerInvariant()
+            if ($expectedPathSet.ContainsKey($pathKey)) { throw "Execution contract contains duplicate expected path: $normalizedPath" }
+            $expectedPathSet[$pathKey] = $true
+        }
     }
 
     $unsafeCommandPattern = '(?i)(?:^|\s)(?:git\s+(?:add|commit|push|merge|rebase|reset|clean|tag|branch|switch|checkout)|gh\s+(?:pr\s+(?:create|edit|ready|merge)|release|secret|variable|workflow\s+run)|kubectl\s+(?:apply|delete|patch|scale|rollout|exec|cp)|terraform\s+(?:apply|destroy|import|taint|untaint)|az\s+deployment)(?:\s|$)'
@@ -316,7 +334,13 @@ function Get-ValidatedGateEvidence([string]$SourcePath, [string]$RepositoryRoot,
         if ([int]$module.configuredCommandCount -ne $commands.Count) {
             throw "Quality-gate command count mismatch for module '$($module.id)'."
         }
-        $derivedModuleStatus = if ($commands.Count -eq 0) {
+        $derivedModuleStatus = if ([string]$module.overall -eq 'BLOCKED') {
+            if (@($commands | Where-Object { [string]$_.status -ne 'NOT_RUN' }).Count -gt 0) {
+                throw "Blocked quality-gate module '$($module.id)' contains an executed command."
+            }
+            'BLOCKED'
+        }
+        elseif ($commands.Count -eq 0) {
             'INCOMPLETE_CONFIGURATION'
         }
         elseif (@($commands | Where-Object { [string]$_.status -ne 'PASS' }).Count -gt 0) {
@@ -332,7 +356,30 @@ function Get-ValidatedGateEvidence([string]$SourcePath, [string]$RepositoryRoot,
     if ([bool]$evidence.worktreeStable -ne ([string]$evidence.startedWorktreeFingerprint -eq [string]$evidence.worktreeFingerprint)) {
         throw 'Quality-gate worktree stability flag is inconsistent with its fingerprints.'
     }
-    $derivedOverall = if (-not [bool]$evidence.worktreeStable -or $derivedModuleStatuses -contains 'FAIL') {
+    $derivedOverall = if ([string]$evidence.overall -eq 'BLOCKED_REPOSITORY_HYGIENE') {
+        if (-not ($evidence.PSObject.Properties.Name -contains 'repositoryHygiene') -or
+            [string]$evidence.repositoryHygiene.status -ne 'BLOCKED' -or
+            @($evidence.repositoryHygiene.issues).Count -eq 0 -or
+            $derivedModuleStatuses -notcontains 'BLOCKED') {
+            throw 'Repository-hygiene gate blockage is not supported by deterministic preflight evidence.'
+        }
+        'BLOCKED_REPOSITORY_HYGIENE'
+    }
+    elseif ([string]$evidence.overall -eq 'PLAN_INVALIDATED') {
+        if (-not ($evidence.PSObject.Properties.Name -contains 'planScope') -or
+            [string]$evidence.planScope.status -ne 'INVALID' -or
+            (@($evidence.planScope.unexpectedPaths).Count + @($evidence.planScope.missingPaths).Count) -eq 0) {
+            throw 'Plan invalidation is not supported by deterministic scope evidence.'
+        }
+        'PLAN_INVALIDATED'
+    }
+    elseif ([string]$evidence.overall -eq 'CONTROL_PLANE_OUTPUT') {
+        if (-not ($evidence.PSObject.Properties.Name -contains 'controlPlaneOutputPaths') -or @($evidence.controlPlaneOutputPaths).Count -eq 0) {
+            throw 'Control-plane output blockage is missing exact output paths.'
+        }
+        'CONTROL_PLANE_OUTPUT'
+    }
+    elseif (-not [bool]$evidence.worktreeStable -or $derivedModuleStatuses -contains 'FAIL') {
         'FAIL'
     }
     elseif ($derivedModuleStatuses -contains 'INCOMPLETE_CONFIGURATION') {
@@ -347,7 +394,7 @@ function Get-ValidatedGateEvidence([string]$SourcePath, [string]$RepositoryRoot,
         throw 'Worktree changed after deterministic quality gates ran.'
     }
     return [pscustomobject]@{
-        Verdict = if ($derivedOverall -eq 'PASS') { 'PASS' } else { 'FAIL' }
+        Verdict = if ($derivedOverall -eq 'PASS') { 'PASS' } elseif ($derivedOverall -in @('BLOCKED_REPOSITORY_HYGIENE', 'CONTROL_PLANE_OUTPUT', 'PLAN_INVALIDATED')) { 'BLOCKED' } else { 'FAIL' }
         Overall = $derivedOverall
         WorktreeFingerprint = [string]$evidence.worktreeFingerprint
     }
@@ -757,11 +804,20 @@ else {
             $state.status = 'IMPLEMENTING'
             Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath
         }
+        'InvalidatePlan' {
+            Assert-Status -State $state -Allowed @('PLAN_APPROVED', 'IMPLEMENTING', 'GATE_FAILED')
+            Assert-Head -State $state -RepositoryRoot $repositoryRoot
+            Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
+            if ([string]::IsNullOrWhiteSpace($Reason)) { throw 'InvalidatePlan requires an evidence-backed Reason.' }
+            $state.status = 'PLAN_INVALIDATED'
+            $state.escalationReason = $Reason
+            Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath
+        }
         'RecordGates' {
             Assert-Status -State $state -Allowed @('IMPLEMENTING')
             Assert-Head -State $state -RepositoryRoot $repositoryRoot
             Assert-ControlPlane -State $state -RepositoryRoot $repositoryRoot
-            if (@('PASS', 'FAIL') -notcontains $Verdict) { throw 'RecordGates requires Verdict PASS or FAIL.' }
+            if (@('PASS', 'FAIL', 'BLOCKED') -notcontains $Verdict) { throw 'RecordGates requires Verdict PASS, FAIL, or BLOCKED.' }
             $source = Resolve-RunRuntimeArtifact -RepositoryRoot $repositoryRoot -RunId $RunId -Path $ArtifactPath -FileName 'gates.json'
             $gateEvidence = Get-ValidatedGateEvidence -SourcePath $source -RepositoryRoot $repositoryRoot -State $state
             if ($Verdict -ne [string]$gateEvidence.Verdict) {
@@ -769,7 +825,16 @@ else {
             }
             Add-Artifact -State $state -Name 'gates' -SourcePath $source -RunRoot $runRoot -ArtifactVerdict $Verdict
             $state.worktreeFingerprint = [string]$gateEvidence.WorktreeFingerprint
-            $state.status = if ($Verdict -eq 'PASS') { 'GATES_PASSED' } else { 'GATE_FAILED' }
+            $state.status = if ($Verdict -eq 'PASS') {
+                'GATES_PASSED'
+            }
+            elseif ($Verdict -eq 'BLOCKED' -and [string]$gateEvidence.Overall -eq 'PLAN_INVALIDATED') {
+                'PLAN_INVALIDATED'
+            }
+            elseif ($Verdict -eq 'BLOCKED') {
+                'GATE_BLOCKED'
+            }
+            else { 'GATE_FAILED' }
             Write-State -State $state -StatePath $statePath -SchemaPath $schemaPath
         }
         'RecordReview' {

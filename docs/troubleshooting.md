@@ -16,7 +16,7 @@ After installation, run `/workflow-doctor` from OpenCode or invoke the same read
 pwsh -NoProfile -File .ai/scripts/check-workflow-runtime.ps1
 ```
 
-`RUNTIME_WARNING` commonly means multiple global installations or shims are visible. Use the reported `selectedOpenCode`, installation directories, versions, and callable flags to correct `PATH`; then restart PowerShell and OpenCode. The doctor never changes the machine.
+`RUNTIME_WARNING` commonly means multiple global installations or shims are visible. Use the reported `selectedOpenCode`, `selectedVersion`, `resolvedOpenCode`, `recommendedCommand`, installation directories, versions, and callable flags to correct `PATH`; then restart PowerShell and OpenCode. On Windows, prefer the reported `.cmd` launcher when a bare `opencode2` resolves to a `.ps1` shim blocked by execution policy. The doctor never changes the machine or its execution policy.
 
 ## Installation reports conflicts
 
@@ -54,7 +54,17 @@ Use `/run-status <run-id>` once. Current agents call `workflow_next` once, take 
 
 Inspect the frozen matrix reported at plan approval. Restore, build, formatting, and test commands for a module containing a solution should name that solution, for example `dotnet build BackNet.sln --no-restore`. Bare commands such as `dotnet build --no-restore` become ambiguous as soon as the working directory contains more than one project or solution file.
 
-Workflow 1.14.1 makes bootstrap target a unique `.sln`/`.slnx`, or a single project when no solution exists. Multiple solutions, or multiple projects without a solution, stay empty and produce a proposal risk instead of guessing. Existing installed project context and already frozen runs are intentionally immutable: update the workflow, regenerate and approve bootstrap context, then create a new run rather than editing state or gate evidence.
+Workflow 1.15.0 makes bootstrap target a unique `.sln`/`.slnx`, or a single project when no solution exists. Multiple solutions, or multiple projects without a solution, stay empty and produce a proposal risk instead of guessing. A version 2 execution contract must also name the solution, the new test project, all exact package versions, and any root-project exclusion. During implementation, use `workflow_dotnet_solution_add` or the exact `add-dotnet-project.ps1` fallback rather than editing solution GUIDs by hand. Existing installed project context and already frozen runs are intentionally immutable: update the workflow, regenerate and approve bootstrap context, then create a new run rather than editing state or gate evidence.
+
+## Quality gate is blocked before commands run
+
+Open `.ai/runtime/<run-id>/gates.json` and inspect `repositoryHygiene`, `planScope`, and `controlPlaneOutputPaths`.
+
+- `BLOCKED_REPOSITORY_HYGIENE` means a stack-specific generated path such as `bin/`, `obj/`, `node_modules/`, `__pycache__/`, `.pytest_cache/`, `target/`, or `build/` is tracked or is not ignored. Commands are intentionally `NOT_RUN`.
+- `PLAN_INVALIDATED` means actual changed paths do not match the approved schema-version-2 `expectedChanges`. Return to planning; do not retry the gate or enter a normal correction loop.
+- `CONTROL_PLANE_OUTPUT` means a build copied `AGENTS.md`, `opencode.json`, `.ai/`, or `.opencode/` into generated output. Approve a narrow application-project exclusion in a separate plan.
+
+The workflow never untracks files, edits `.gitignore`, or changes an application project automatically. See [Reliability, preflight, and execution contracts](reliability-and-preflight.md) for the complete remediation model.
 
 For bootstrap, inspect `.ai/bootstrap-proposal/approval.md` and `evidence.md`; for gates, inspect `.ai/runtime/<run-id>/gates.json`. The full evidence is persisted even though model-facing tool output is intentionally compact. Record duplicate calls, violations, and step-limit exhaustion in the benchmark rather than increasing every agent's step budget.
 

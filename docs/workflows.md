@@ -34,7 +34,7 @@ No production code changes during planning.
 
 ### Approve
 
-Correct the proposal or explicitly approve it. Planning always writes `.ai/runtime/<run-id>/verification.json`; its command list is empty when configured gates are sufficient. Approval persists the exact plan, verification manifest, and affected module IDs. State validates and hashes the manifest, hashes the current `.ai/project.json`, and freezes the complete merged phase/command matrix for those modules. A mandatory command mentioned only in prose is not approval-ready.
+Correct the proposal or explicitly approve it. Planning always writes `.ai/runtime/<run-id>/verification.json`. New runs use schema version 2: the artifact freezes affected module IDs, exact expected paths, exact dependency versions and reasons, settled decisions, constraints, diff budget, and task-specific quality commands. `unresolvedDecisions` must be empty. Approval persists the exact plan and execution contract. State validates and hashes both, hashes the current `.ai/project.json`, and freezes the complete merged phase/command matrix for those modules. A mandatory change or command mentioned only in prose is not approval-ready. Schema version 1 remains readable only for compatibility with already persisted runs.
 
 Changing module selection later requires a new approved plan. Conversation history alone is not approval.
 
@@ -42,13 +42,13 @@ Changing module selection later requires a new approved plan. Conversation histo
 
 Run `/implement` or request the full workflow. The orchestrator validates the run and sends the canonical requirement, plan, constraints, diff budget, and selected module context to the developer.
 
-The developer stops with `PLAN INVALIDATED` if repository evidence contradicts the plan. It cannot add dependencies, change public contracts, alter migrations or CI/CD, or expand a refactor without approval. It does not use general shell commands for discovery, Git inspection, runtime checks, or ad hoc verification, and it never composes multiple commands; persisted evidence and the deterministic gate runner own those operations.
+The developer stops with `PLAN INVALIDATED` if repository evidence contradicts the plan. It cannot add unapproved dependencies or files, change public contracts, alter migrations or CI/CD, or expand a refactor without approval. For an approved .NET test project, it follows the built-in xUnit recipe and uses `workflow_dotnet_solution_add` (or its exact fallback once) instead of hand-editing solution identifiers. It does not use general shell commands for discovery, Git inspection, runtime checks, or ad hoc verification, and it never composes multiple commands; persisted evidence and the deterministic gate runner own those operations.
 
 The tester may add focused tests only in established test locations. If testing requires a production design change, it reports `TESTABILITY ISSUE`.
 
 ### Gate
 
-`workflow_gate` receives the run ID. It obtains the module list and approved verification manifest from state, verifies project, manifest, and merged-matrix hashes, and executes phases in this fixed order:
+`workflow_gate` receives the run ID. It obtains the module list and approved execution contract from state, verifies project, contract, and merged-matrix hashes, and performs two prechecks before any quality command: the actual changed paths must match version 2 `expectedChanges`, and stack-specific generated directories must be ignored and untracked. A scope mismatch produces `PLAN_INVALIDATED`; unsafe generated outputs produce `BLOCKED_REPOSITORY_HYGIENE`. It then executes phases in this fixed order:
 
 1. `restore`
 2. `build`
@@ -59,7 +59,7 @@ The tester may add focused tests only in established test locations. If testing 
 
 Configured commands run first and approved task-specific commands follow in manifest order within the same phase. An empty phase is `NOT CONFIGURED`. The first failure normally stops that module and later commands become `NOT RUN`. A module with no commands is incomplete, not passing. For .NET modules, bootstrap-generated commands explicitly name the unique solution or project so adding another `.csproj` cannot turn a previously valid gate into `MSB1011`; approved run-specific commands must preserve that target.
 
-The runner writes `.ai/runtime/<run-id>/gates.json`. If the run, project, runner, matrix, and worktree fingerprints are unchanged, a repeated gate request returns the existing validated artifact instead of executing commands again. `force: true` is reserved for an explicit intentional rerun. State accepts only that run-specific path and independently validates the run ID, module identities and paths, phases and commands, hashes, exit-derived status, and worktree stability before accepting it. Other active runs keep separate staging directories.
+After commands, the runner also rejects workflow control-plane files copied below generated-output directories with `CONTROL_PLANE_OUTPUT`. The runner writes all path, hygiene, scope, command, and output evidence to `.ai/runtime/<run-id>/gates.json`. If the run, project, runner, matrix, and worktree fingerprints are unchanged, a repeated gate request returns the existing validated artifact instead of executing commands again. `force: true` is reserved for an explicit intentional rerun. State accepts only that run-specific path and independently validates the run ID, module identities and paths, phases and commands, hashes, exit-derived status, worktree stability, repository hygiene, plan scope, and control-plane output before accepting it. Other active runs keep separate staging directories.
 
 ### Review
 
@@ -83,7 +83,7 @@ A `BLOCKER` or `HIGH` finding requires an approved correction, a full gate rerun
 
 Project configuration may lower these limits but cannot raise them.
 
-Before editing, the agent runs `workflow_fast_path` in `Estimate` mode and presents a compact micro-plan plus a run-specific verification manifest with exact paths, line estimate, verification, risk flags, evidence, and non-goals. One explicit approval authorizes only those exact artifacts.
+Before editing, the agent runs `workflow_fast_path` in `Estimate` mode and presents a compact micro-plan plus a schema-version-2 execution contract with exact paths, line estimate, verification, risk flags, evidence, closed decisions, constraints, and non-goals. Dependencies remain empty because adding one is ineligible. One explicit approval authorizes only those exact artifacts.
 
 After implementation, it runs the frozen merged quality matrix and `workflow_fast_path` in `Actual` mode. Actual mode derives files, line counts, module mapping, untracked files, binary uncertainty, and conservative path risks from Git. Expansion returns `FAST PATH INVALIDATED`.
 
@@ -113,7 +113,7 @@ Delivery is split into single operations:
 4. `/publish` proposes a normal feature-branch push.
 5. `/pr-create` proposes a draft PR with explicit base and head.
 
-Each operation requires a fresh proposal, revalidation, and approval. Approval does not carry forward. The delivery agent stops after one operation and records evidence under `.ai/runtime/<run-id>/`. The branch script accepts the run ID and persists the previous branch, created branch, and SHA. The commit script accepts the run ID and owns both evidence generation and state recording.
+Each operation requires a fresh proposal, revalidation, and approval. Approval does not carry forward. The delivery agent loads only the skills required by the requested operation and stops after that one operation. For branch creation it trusts the orchestrator's fresh state and delivery checks instead of repeating raw Git discovery. The branch script accepts the run ID, captures Git chatter, persists the previous branch, created branch, and SHA, and returns compact JSON with the canonical artifact hash. The commit script accepts the run ID and owns both evidence generation and state recording.
 
 Commits stage exact paths only; broad staging, amend, and AI authorship trailers are forbidden. State independently reads the actual commit message and changed paths, validates Conventional Commits, and compares them with `commit.json`; a fabricated evidence message cannot legitimize a nonconforming commit. Publishing never force-pushes, pushes tags, deletes refs, or publishes a protected/shared branch. State independently verifies the published remote ref and SHA. PR creation does not add reviewers, labels, assignees, comments, merge, or auto-merge; state independently queries GitHub and requires the exact open draft PR metadata before recording success.
 
