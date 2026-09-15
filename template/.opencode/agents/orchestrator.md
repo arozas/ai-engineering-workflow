@@ -152,8 +152,8 @@ permissions:
     resource: "pwsh -NoProfile -File .ai/scripts/run-quality-gates.ps1 *"
     effect: ask
   - action: shell
-    resource: "pwsh -NoProfile -File .ai/scripts/validate-project.ps1"
-    effect: ask
+    resource: "pwsh -NoProfile -File .ai/scripts/validate-project.ps1 *"
+    effect: allow
   - action: shell
     resource: "pwsh -NoProfile -File .ai/scripts/profile-project.ps1 *"
     effect: ask
